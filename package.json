@@ -1,0 +1,26 @@
+{
+  "name": "@humanos/agent-kit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Put an AI agent under a mandate a person grants: every tool call verified by Humanos before it runs, every decision and outcome on a signed, hash-chained record. Two worked examples for an insurer — customer support and claims handling.",
+  "scripts": {
+    "support": "tsx examples/support/main.ts",
+    "claims": "tsx examples/claims/main.ts",
+    "test": "vitest run",
+    "check-types": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@humanos/agent-sdk": "file:vendor/humanos-agent-sdk-0.1.0.tgz",
+    "@humanos/via-sdk-v03": "file:vendor/humanos-via-sdk-v03-0.3.0.tgz"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
