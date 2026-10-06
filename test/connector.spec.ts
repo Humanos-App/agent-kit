@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ViaMcpClient, ViaToolResult } from '@humanos/agent-sdk';
+import { createViaMcpClient, ViaMcpAuthError } from '@humanos/agent-sdk';
 import { ConnectorRefusal, call, proposeAction, registerAgent, requestPolicyMandate, waitForStepUp } from '../lib/connector.js';
 import { suggestedUserParams } from '../lib/surface.js';
 import { storedSoftwareKey } from '../lib/stored-key.js';
@@ -80,6 +81,38 @@ describe('connector', () => {
   it('waitForStepUp: gives up at the deadline', async () => {
     const { client } = fakeClient(() => json({ status: 'pending' }));
     expect(await waitForStepUp(client, 's1', { timeoutMs: 0, sleep: async () => {} })).toBe('timeout');
+  });
+});
+
+describe('connector HTTP errors, through the vendored SDK client', () => {
+  // The response body is the only thing that tells these failures apart, so it must reach the error.
+  const answering = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+    createViaMcpClient({
+      url: 'https://connector.test/mcp',
+      apiKey: 'key',
+      signatureSecret: 'secret',
+      fetchImpl: async () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers }),
+    });
+
+  it('a signature refusal carries the connector\'s words, the status and the body', async () => {
+    const body = { message: 'Invalid signature', error: 'Unauthorized', statusCode: 401 };
+    const error = await answering(401, body).listTools().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ViaMcpAuthError);
+    expect(error).toMatchObject({ status: 401, body, message: 'credential refused (HTTP 401): Invalid signature' });
+  });
+
+  it('a token refusal carries the OAuth description and the challenge', async () => {
+    const challenge = 'Bearer error="invalid_token", resource_metadata="https://connector.test/.well-known/oauth-protected-resource"';
+    const body = { error: 'invalid_token', error_description: 'invalid token' };
+    const error = await answering(401, body, { 'WWW-Authenticate': challenge }).listTools().catch((e: unknown) => e);
+    expect(error).toMatchObject({ status: 401, body, message: `credential refused (HTTP 401): invalid token [${challenge}]` });
+  });
+
+  it('any other HTTP failure names the server\'s reason', async () => {
+    await expect(answering(500, { jsonrpc: '2.0', id: 1, error: { code: -32603, message: 'boom' } }).listTools()).rejects.toThrow(
+      'MCP request failed: HTTP 500: boom',
+    );
+    await expect(answering(502, '<html>\n  Bad Gateway\n</html>').listTools()).rejects.toThrow('MCP request failed: HTTP 502: <html> Bad Gateway </html>');
   });
 });
 
