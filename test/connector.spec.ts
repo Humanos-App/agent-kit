@@ -84,7 +84,7 @@ describe('connector', () => {
   });
 });
 
-describe('connector HTTP errors, through the vendored SDK client', () => {
+describe('connector HTTP errors, through the SDK client', () => {
   // The response body is the only thing that tells these failures apart, so it must reach the error.
   const answering = (status: number, body: unknown, headers: Record<string, string> = {}) =>
     createViaMcpClient({
