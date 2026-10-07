@@ -49,7 +49,7 @@ The kit runs against the Humanos **staging** environment:
    organization. The agents will belong to it.
 2. **Create an API key** for the organization in the dashboard. Its signing secret is shown once.
 3. **Put both in `.env`** as `HUMANOS_API_KEY` and `HUMANOS_SIGNATURE_SECRET`. `HUMANOS_MCP_URL`
-   is already set to the staging connector, `https://demo.humanos.tech/mcp`.
+   is already set to the staging connector, `https://mcptest.humanos.tech/mcp`.
 
 The same dashboard is where you publish the agents' actions, and where the person who grants a
 mandate approves it.
