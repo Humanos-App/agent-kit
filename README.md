@@ -5,8 +5,9 @@ tool runs, Humanos verifies the call against the mandate; every decision and eve
 written to a signed, hash-chained record. That record is what an insurer can score and underwrite
 on: it says what the agent was allowed to do, what it tried, and what happened.
 
-Built on `@humanos/agent-sdk` and the VIA protocol SDK `@humanos/via-sdk-v03`. Both ship with
-this kit, packaged, in [`vendor/`](vendor) — nothing else from Humanos needs to be installed.
+Built on [`@humanos/agent-sdk`](https://github.com/Humanos-App/agent-sdk) and the VIA protocol
+SDK `@humanos/via-sdk-v03`. `npm install` fetches both from the SDK's repository, pinned to a
+release tag, and builds the SDK — there is nothing else to set up.
 
 ## The examples
 
@@ -36,7 +37,7 @@ organization.
 
 ## Run it
 
-Requires Node.js 20 or later.
+Requires Node.js 20 or later, and `git` (npm uses it to fetch the SDK).
 
 ```
 npm install
