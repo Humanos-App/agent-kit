@@ -70,8 +70,10 @@ export interface ActorSummary {
   retiredActors: { id: string; succeededBy: string | null; lastEventAt: string | null }[];
 }
 
-export function getActor(client: ViaMcpClient, did: string): Promise<ActorSummary> {
-  return call<ActorSummary>(client, 'get_actor', { did });
+export async function getActor(client: ViaMcpClient, did: string): Promise<ActorSummary> {
+  const answer = await call<ActorSummary | ActorRecord>(client, 'get_actor', { did });
+  // A connector deployed before 2026-10-13 answers the record's fields at the top, with no `record`.
+  return 'record' in answer ? answer : { record: answer, lastEventAt: null, retiredActors: [] };
 }
 
 export interface Registered {

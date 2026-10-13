@@ -47,6 +47,11 @@ describe('connector', () => {
     expect((await getActor(queued, 'did:x')).record).toBeNull();
   });
 
+  it('getActor: a connector from before 2026-10-13 answers the fields at the top, read as the record', async () => {
+    const { client } = fakeClient(() => json({ id: 'did:x', actorType: 'agent', status: 'ACTIVE', assurance: 'pop', binding: 'self' }));
+    expect(await getActor(client, 'did:x')).toMatchObject({ record: { id: 'did:x', status: 'ACTIVE' }, lastEventAt: null, retiredActors: [] });
+  });
+
   it('registerAgent: challenge, then the public key + nonce-bound evidence + the declared tools', async () => {
     const key = await storedSoftwareKey(join(mkdtempSync(join(tmpdir(), 'via-')), 'k.json'));
     const { client, calls } = fakeClient((name) =>
