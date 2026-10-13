@@ -43,18 +43,31 @@ export interface ServerInfo {
 }
 
 /**
- * What `get_actor` returns: the actor's subject as the fold derives it from its chain (v0.3 §3.1,
- * §5).
+ * The VIAActor record (v0.3 §3.1): the actor's subject as the fold derives it from its chain (§5),
+ * and the position on that chain it was folded to. `status` is `active` / `suspended` / `retired`.
  * The organization an agent acts for is the `operator` POINTER to the org-signed AFFILIATION.
  */
-export interface ActorSummary {
+export interface ActorRecord {
   id: string;
   actorType: string;
   status: string;
   assurance?: string;
   binding?: string;
-  operator?: { org: string; relation?: string; affiliationEvent: string };
+  operator?: { org: string; relation?: string; validUntil?: string; affiliationEvent: string };
   keys?: unknown[];
+  chain: { genesisEvent: string; headEvent: string; sequence: number };
+}
+
+/**
+ * What `get_actor` returns. `record` is null while the registration is still queued: the actor
+ * exists, its chain does not yet.
+ */
+export interface ActorSummary {
+  record: ActorRecord | null;
+  /** When the chain's last event was signed. Null with no chain. */
+  lastEventAt: string | null;
+  /** The actors merged into this one, each with the position of its own chain. */
+  retiredActors: { id: string; succeededBy: string | null; lastEventAt: string | null }[];
 }
 
 export function getActor(client: ViaMcpClient, did: string): Promise<ActorSummary> {
@@ -125,8 +138,10 @@ export function requestPolicyMandate(
 
 export interface MandateStatus {
   mandateId: string;
+  kind: 'policy' | 'authorization';
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
   phase: 'PENDING' | 'ACTIVE' | 'REFUSED' | 'INACTIVE';
-  decisions: { contact: string; accepted: boolean; decidedAt: string }[];
+  boundAgentDids: string[];
 }
 
 export function mandateStatus(client: ViaMcpClient, mandateId: string): Promise<MandateStatus> {

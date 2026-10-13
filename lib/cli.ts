@@ -97,9 +97,13 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
       if (!key.did) {
         log(`${def.label}: not registered — run \`register\``);
       } else {
-        const a = await getActor(client, key.did);
-        const op = a.operator ? `operated by ${a.operator.org}${a.operator.relation ? ` (${a.operator.relation})` : ''}` : 'no AFFILIATION yet';
-        log(`${def.label} ${key.did}: ${a.actorType}, ${a.status}, ${a.assurance ?? '?'}/${a.binding ?? '?'}, ${op}`);
+        const { record: a } = await getActor(client, key.did);
+        if (!a) {
+          log(`${def.label} ${key.did}: registered, its chain not written yet`);
+        } else {
+          const op = a.operator ? `operated by ${a.operator.org}${a.operator.relation ? ` (${a.operator.relation})` : ''}` : 'no AFFILIATION yet';
+          log(`${def.label} ${key.did}: ${a.actorType}, ${a.status}, ${a.assurance ?? '?'}/${a.binding ?? '?'}, ${op}`);
+        }
         const held = await getMandates(client, key.did);
         log(held.length ? `holds ${held.map((h) => h.mandate.id).join(', ')}` : 'holds no mandate');
       }

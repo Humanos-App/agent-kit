@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ViaMcpClient, ViaToolResult } from '@humanos/agent-sdk';
 import { createViaMcpClient, ViaMcpAuthError } from '@humanos/agent-sdk';
-import { ConnectorRefusal, call, proposeAction, registerAgent, requestPolicyMandate, waitForStepUp } from '../lib/connector.js';
+import { ConnectorRefusal, call, getActor, proposeAction, registerAgent, requestPolicyMandate, waitForStepUp } from '../lib/connector.js';
 import { suggestedUserParams } from '../lib/surface.js';
 import { storedSoftwareKey } from '../lib/stored-key.js';
 import { loadEnv } from '../lib/env.js';
@@ -35,6 +35,16 @@ describe('connector', () => {
     const { client } = fakeClient(() => ({ text: 'no such agent', isError: true }));
     await expect(call(client, 'get_actor')).rejects.toThrow(ConnectorRefusal);
     await expect(call(client, 'get_actor')).rejects.toThrow('get_actor refused: no such agent');
+  });
+
+  it('getActor: the fields sit under record, null while the registration is queued', async () => {
+    const record = { id: 'did:x', actorType: 'agent', status: 'active', assurance: 'pop', binding: 'self', chain: { genesisEvent: 'e1', headEvent: 'e2', sequence: 2 } };
+    const { client, calls } = fakeClient(() => json({ record, lastEventAt: '2026-10-13T00:00:00Z', retiredActors: [] }));
+    expect((await getActor(client, 'did:x')).record?.status).toBe('active');
+    expect(calls[0]).toEqual({ name: 'get_actor', args: { did: 'did:x' } });
+
+    const { client: queued } = fakeClient(() => json({ record: null, lastEventAt: null, retiredActors: [] }));
+    expect((await getActor(queued, 'did:x')).record).toBeNull();
   });
 
   it('registerAgent: challenge, then the public key + nonce-bound evidence + the declared tools', async () => {
