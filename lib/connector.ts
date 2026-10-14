@@ -86,10 +86,11 @@ export interface Registered {
 
 /** §16.5 (v0.3): challenge → evidence bound to the nonce → the platform grades the rung. */
 export async function registerAgent(client: ViaMcpClient, key: ViaAgentKey, surface: AgentSurface): Promise<Registered> {
-  const { regNonce } = await call<{ regNonce: string }>(client, 'register_challenge');
+  // `aud` is the platform DID the key's proof names (v0.3 §16.5).
+  const { regNonce, aud } = await call<{ regNonce: string; aud: string }>(client, 'register_challenge');
   return call<Registered>(client, 'register', {
     publicKeyJwk: key.publicJwk,
-    evidence: await key.evidence(regNonce),
+    evidence: await key.evidence(regNonce, aud),
     regNonce,
     tools: toDeclaration(surface),
   });

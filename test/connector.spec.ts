@@ -55,14 +55,15 @@ describe('connector', () => {
   it('registerAgent: challenge, then the public key + nonce-bound evidence + the declared tools', async () => {
     const key = await storedSoftwareKey(join(mkdtempSync(join(tmpdir(), 'via-')), 'k.json'));
     const { client, calls } = fakeClient((name) =>
-      name === 'register_challenge' ? json({ regNonce: 'n-1' }) : json({ did: 'did:x', keyId: 'k', granted: { assurance: 'pop', binding: 'self' }, existing: false }),
+      name === 'register_challenge' ? json({ regNonce: 'n-1', aud: 'did:web:humanos.tech' }) : json({ did: 'did:x', keyId: 'k', granted: { assurance: 'pop', binding: 'self' }, existing: false }),
     );
     const reg = await registerAgent(client, key, CLAIMS_SURFACE);
     expect(reg.did).toBe('did:x');
     expect(calls.map((c) => c.name)).toEqual(['register_challenge', 'register']);
     const args = calls[1]!.args as { publicKeyJwk: Record<string, string>; regNonce: string; evidence: unknown; tools: { name: string }[] };
     expect(args.regNonce).toBe('n-1');
-    expect(args.evidence).toEqual({ type: 'none' });
+    // The key proves it is held: a via-reg+jwt over the nonce and the platform DID (v0.3 §16.5).
+    expect(args.evidence).toMatchObject({ type: 'device-self', proof: expect.stringMatching(/^ey/) });
     expect(args.publicKeyJwk).not.toHaveProperty('d'); // the private half never leaves
     expect(args.tools.map((t) => t.name)).toEqual(CLAIMS_SURFACE.tools.map((t) => t.name));
   });

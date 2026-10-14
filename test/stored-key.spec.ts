@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ViaGuard } from '@humanos/agent-sdk';
 import { createTestVerifier } from '@humanos/agent-sdk/testing';
 import { storedSoftwareKey } from '../lib/stored-key.js';
+import { createRegChallengeStore, registerAgentKey, registerChallenge } from '@humanos/via-sdk-v03';
 
 const file = () => join(mkdtempSync(join(tmpdir(), 'via-key-')), 'key.json');
 
@@ -37,6 +38,18 @@ describe('storedSoftwareKey — a key that survives the process', () => {
   it('is the lowest rung, and says so', async () => {
     const key = await storedSoftwareKey(file());
     expect([key.claimedAssurance, key.claimedBinding]).toEqual(['pop', 'self']);
-    expect(await key.evidence('nonce')).toEqual({ type: 'none' });
+  });
+
+  // v0.3 §16.5 (2026-10-14): a key the agent holds proves it is held; the protocol SDK checks it.
+  it('proves it is held, and the protocol SDK registers it at pop/self', async () => {
+    const key = await storedSoftwareKey(file());
+    const store = createRegChallengeStore();
+    const { regNonce } = await registerChallenge({ store });
+    const aud = 'did:web:humanos.tech';
+    const res = await registerAgentKey(
+      { cnf: { jwk: key.publicJwk }, evidence: await key.evidence(regNonce, aud), regNonce },
+      { store, audience: aud },
+    );
+    expect(res.ok && [res.assurance, res.binding]).toEqual(['pop', 'self']);
   });
 });
