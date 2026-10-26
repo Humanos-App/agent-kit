@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ViaMcpClient, ViaToolResult } from '@humanos/agent-sdk';
 import { createViaMcpClient, ViaMcpAuthError } from '@humanos/agent-sdk';
-import { ConnectorRefusal, call, getActor, proposeAction, registerAgent, requestPolicyMandate, waitForStepUp } from '../lib/connector.js';
+import { ConnectorRefusal, call, getActor, mandateKinds, proposeAction, registerAgent, requestPolicyMandate, waitForStepUp } from '../lib/connector.js';
 import { suggestedUserParams } from '../lib/surface.js';
 import { storedSoftwareKey } from '../lib/stored-key.js';
 import { loadEnv } from '../lib/env.js';
@@ -17,11 +17,16 @@ import { SUPPORT_SURFACE } from '../examples/support/agent.js';
 
 const json = (v: unknown): ViaToolResult => ({ text: JSON.stringify(v), isError: false });
 
-function fakeClient(answer: (name: string, args: Record<string, unknown>) => ViaToolResult) {
+/** The connector deployed before the policy release: it still serves `get_actor` and `list_mandate_kinds`. */
+const TOOLS_BEFORE_POLICY = ['server_info', 'get_actor', 'list_mandate_kinds', 'get_mandate', 'request_mandate', 'mandate_status', 'stepup_status'];
+/** The connector with the organization's policy: `get_policy` in their place. */
+const TOOLS_WITH_POLICY = ['server_info', 'get_policy', 'get_mandate', 'request_mandate', 'mandate_status'];
+
+function fakeClient(answer: (name: string, args: Record<string, unknown>) => ViaToolResult, tools = TOOLS_BEFORE_POLICY) {
   const calls: { name: string; args: Record<string, unknown> }[] = [];
   const client: ViaMcpClient = {
     initialize: async () => ({ serverInfo: { name: 'fake', version: '0' }, protocolVersion: '2025-11-25' }),
-    listTools: async () => [],
+    listTools: async () => tools.map((name) => ({ name, inputSchema: { type: 'object' } })) as never,
     callTool: async (name, args = {}) => {
       calls.push({ name, args });
       return answer(name, args);
@@ -40,11 +45,39 @@ describe('connector', () => {
   it('getActor: the fields sit under record, null while the registration is queued', async () => {
     const record = { id: 'did:x', actorType: 'agent', status: 'active', assurance: 'pop', binding: 'self', chain: { genesisEvent: 'e1', headEvent: 'e2', sequence: 2 } };
     const { client, calls } = fakeClient(() => json({ record, lastEventAt: '2026-10-13T00:00:00Z', retiredActors: [] }));
-    expect((await getActor(client, 'did:x')).record?.status).toBe('active');
+    expect((await getActor(client, 'did:x'))?.record?.status).toBe('active');
     expect(calls[0]).toEqual({ name: 'get_actor', args: { did: 'did:x' } });
 
     const { client: queued } = fakeClient(() => json({ record: null, lastEventAt: null, retiredActors: [] }));
-    expect((await getActor(queued, 'did:x')).record).toBeNull();
+    expect((await getActor(queued, 'did:x'))?.record).toBeNull();
+  });
+
+  it('getActor: a connector with the policy reads no actor — null, and get_actor is never called', async () => {
+    const { client, calls } = fakeClient(() => json({}), TOOLS_WITH_POLICY);
+    expect(await getActor(client, 'did:x')).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    ['before the policy release, list_mandate_kinds', TOOLS_BEFORE_POLICY, 'list_mandate_kinds'],
+    ['with the policy, the mandate controls get_policy lists', TOOLS_WITH_POLICY, 'get_policy'],
+  ])('mandateKinds: the published actions a mandate can be asked under — %s', async (_case, tools, tool) => {
+    const { client, calls } = fakeClient(
+      (name) =>
+        name === 'list_mandate_kinds'
+          ? json({ policies: [{ id: 'urn:via:action:a', name: 'Claims', version: 2, userParams: {} }], drafts: [] })
+          : json({
+              tools: [
+                { tool: 'pay', mandateControls: [{ id: 'urn:via:action:a', name: 'Claims' }] },
+                { tool: 'refund', mandateControls: [{ id: 'urn:via:action:a', name: 'Claims' }] },
+                { tool: 'read' },
+              ],
+            }),
+      tools,
+    );
+    const kinds = await mandateKinds(client, 'did:x');
+    expect(kinds.policies.map((p) => [p.id, p.name])).toEqual([['urn:via:action:a', 'Claims']]);
+    expect(calls.map((c) => c.name)).toEqual([tool]);
   });
 
   it('getActor: a connector from before 2026-10-13 answers the fields at the top, read as the record', async () => {

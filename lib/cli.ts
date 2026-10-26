@@ -97,8 +97,11 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
       if (!key.did) {
         log(`${def.label}: not registered — run \`register\``);
       } else {
-        const { record: a } = await getActor(client, key.did);
-        if (!a) {
+        const actor = await getActor(client, key.did);
+        const a = actor?.record;
+        if (!actor) {
+          log(`${def.label} ${key.did}: registered (this connector does not read an agent's record)`);
+        } else if (!a) {
           log(`${def.label} ${key.did}: registered, its chain not written yet`);
         } else {
           const op = a.operator ? `operated by ${a.operator.org}${a.operator.relation ? ` (${a.operator.relation})` : ''}` : 'no AFFILIATION yet';
@@ -107,10 +110,10 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
         const held = await getMandates(client, key.did);
         log(held.length ? `holds ${held.map((h) => h.mandate.id).join(', ')}` : 'holds no mandate');
       }
-      const kinds = await mandateKinds(client);
+      const kinds = await mandateKinds(client, key.did ?? '');
       const mine = kinds.policies.find((p) => p.name === def.surface.name);
       const draft = kinds.drafts.find((d) => d.name === def.surface.name);
-      log(`action "${def.surface.name}": ${mine ? `published v${mine.version}` : draft ? 'proposed, awaiting publication in the dashboard' : 'not proposed'}`);
+      log(`action "${def.surface.name}": ${mine ? `published${mine.version ? ` v${mine.version}` : ''}` : draft ? 'proposed, awaiting publication in the dashboard' : 'not proposed'}`);
       return;
     }
 
@@ -135,7 +138,7 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
       if (!key.did) throw new Error('register first');
       const contact = rest.find((a) => !a.startsWith('--'));
       if (!contact) throw new Error('request <contact> — the email or phone of the person who authorizes');
-      const policy = (await mandateKinds(client)).policies.find((p) => p.name === def.surface.name);
+      const policy = (await mandateKinds(client, key.did)).policies.find((p) => p.name === def.surface.name);
       if (!policy) throw new Error(`"${def.surface.name}" is not published — the organization publishes the proposed draft in the dashboard first`);
       const req = await requestPolicyMandate(client, {
         did: key.did,
