@@ -222,9 +222,21 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
   }
 }
 
+/**
+ * What went wrong, in one line. A request that never reached the connector says only `fetch failed`, and its reason
+ * (refused, unknown host, TLS) is in `cause`, so it is named with the URL it was for.
+ */
+export function errorLine(e: unknown, url = process.env.HUMANOS_MCP_URL): string {
+  if (!(e instanceof Error)) return String(e);
+  if (e.message !== 'fetch failed') return e.message;
+  const why = e.cause instanceof Error ? e.cause.message : 'no reason given';
+  const hint = url && /^https:\/\/(localhost|127\.0\.0\.1)\b/.test(url) ? ' — a local connector serves http, not https' : '';
+  return `could not reach the connector at ${url ?? '(HUMANOS_MCP_URL unset)'}: ${why}${hint}`;
+}
+
 export function main(def: AgentDef): void {
   runCli(def).catch((e) => {
-    console.error(e instanceof Error ? e.message : e);
+    console.error(errorLine(e));
     process.exit(1);
   });
 }

@@ -9,6 +9,7 @@ import type { ViaMcpClient, ViaToolResult } from '@humanos/agent-sdk';
 import { createViaMcpClient, ViaMcpAuthError } from '@humanos/agent-sdk';
 import { ConnectorRefusal, call, getActor, mandateKinds, proposeAction, registerAgent, requestPolicyMandate } from '../lib/connector.js';
 import { suggestedUserParams } from '../lib/surface.js';
+import { errorLine } from '../lib/cli.js';
 import { storedSoftwareKey } from '../lib/stored-key.js';
 import { loadEnv } from '../lib/env.js';
 import { writeFileSync } from 'node:fs';
@@ -144,6 +145,25 @@ describe('connector HTTP errors, through the SDK client', () => {
     const body = { error: 'invalid_token', error_description: 'invalid token' };
     const error = await answering(401, body, { 'WWW-Authenticate': challenge }).listTools().catch((e: unknown) => e);
     expect(error).toMatchObject({ status: 401, body, message: `credential refused (HTTP 401): invalid token [${challenge}]` });
+  });
+
+  it('a connector never reached names the URL and the reason, which fetch keeps in its cause', async () => {
+    const refused = (url: string) =>
+      createViaMcpClient({
+        url,
+        apiKey: 'key',
+        signatureSecret: 'secret',
+        fetchImpl: async () => {
+          throw new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 127.0.0.1:4006') });
+        },
+      })
+        .listTools()
+        .catch((e: unknown) => e);
+    const local = 'http://localhost:4006/mcp';
+    expect(errorLine(await refused(local), local)).toBe(`could not reach the connector at ${local}: connect ECONNREFUSED 127.0.0.1:4006`);
+    const tls = 'https://localhost:4005/mcp';
+    expect(errorLine(await refused(tls), tls)).toMatch(/serves http, not https$/);
+    expect(errorLine(new Error('register first'))).toBe('register first');
   });
 
   it('any other HTTP failure names the server\'s reason', async () => {
