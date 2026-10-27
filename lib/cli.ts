@@ -3,7 +3,8 @@
  * platform lifecycle, over the connector, with the organization's API key:
  *
  *   status                       who we are on the platform, the mandates we hold, each tool's access
- *   register                     mint (or load) the agent's key and register it (v0.3 §16.5)
+ *   register                     mint (or load) the agent's key and register it (v0.3 §16.5), with its tools
+ *   declare                      declare a registered agent's tools again, as they are now
  *   propose                      propose the agent's action for the organization to publish
  *   request <contact> [--wait]   ask a person for a policy mandate under the published action
  *   wait <mandateId>             poll until the person decides
@@ -20,6 +21,7 @@ import { storedSoftwareKey } from './stored-key.js';
 import {
   call,
   connect,
+  declareTools,
   getActor,
   getPolicy,
   mandateKinds,
@@ -143,6 +145,15 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
       return;
     }
 
+    case 'declare': {
+      if (!key.did) throw new Error('register first');
+      const r = await declareTools(client, key.did, def.surface);
+      log(`declared ${r.recorded} tools under "${def.surface.service}"${r.absent ? ` · ${r.absent} no longer declared` : ''}`);
+      for (const s of r.skipped) log(`  skipped ${s.name ?? `#${s.index}`}: ${s.reason}`);
+      log(`  next: ${r.next}`);
+      return;
+    }
+
     case 'propose': {
       if (!key.did) throw new Error('register first');
       const r = await proposeAction(client, key.did, def.surface);
@@ -218,7 +229,7 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
     }
 
     default:
-      throw new Error(`unknown command "${cmd}" — status | register | propose | request <contact> | wait <id> | scenarios | run <scenario> | chat`);
+      throw new Error(`unknown command "${cmd}" — status | register | declare | propose | request <contact> | wait <id> | scenarios | run <scenario> | chat`);
   }
 }
 

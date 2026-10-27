@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ViaMcpClient, ViaToolResult } from '@humanos/agent-sdk';
 import { createViaMcpClient, ViaMcpAuthError } from '@humanos/agent-sdk';
-import { ConnectorRefusal, call, getActor, mandateKinds, proposeAction, registerAgent, requestPolicyMandate } from '../lib/connector.js';
-import { suggestedUserParams } from '../lib/surface.js';
+import { ConnectorRefusal, call, declareTools, getActor, mandateKinds, proposeAction, registerAgent, requestPolicyMandate } from '../lib/connector.js';
+import { suggestedUserParams, toDeclaration, toInputSchema } from '../lib/surface.js';
 import { errorLine } from '../lib/cli.js';
 import { storedSoftwareKey } from '../lib/stored-key.js';
 import { loadEnv } from '../lib/env.js';
@@ -96,12 +96,48 @@ describe('connector', () => {
     const reg = await registerAgent(client, key, CLAIMS_SURFACE);
     expect(reg.did).toBe('did:x');
     expect(calls.map((c) => c.name)).toEqual(['register_challenge', 'register']);
-    const args = calls[1]!.args as { publicKeyJwk: Record<string, string>; regNonce: string; evidence: unknown; tools: { name: string }[] };
+    const args = calls[1]!.args as { publicKeyJwk: Record<string, string>; regNonce: string; evidence: unknown; tools: Record<string, unknown>[] };
     expect(args.regNonce).toBe('n-1');
     // The key proves it is held: a via-reg+jwt over the nonce and the platform DID (v0.3 §16.5).
     expect(args.evidence).toMatchObject({ type: 'device-self', proof: expect.stringMatching(/^ey/) });
     expect(args.publicKeyJwk).not.toHaveProperty('d'); // the private half never leaves
     expect(args.tools.map((t) => t.name)).toEqual(CLAIMS_SURFACE.tools.map((t) => t.name));
+    // Each tool as an MCP server describes one — title, service, input schema, hints — never the legacy flat params.
+    const pay = args.tools.find((t) => t.name === 'pay_claimant');
+    expect(pay).toMatchObject({
+      title: 'Pay a claimant',
+      service: 'Northwind back office',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      inputSchema: {
+        type: 'object',
+        required: ['claim_id', 'amount_eur', 'iban'],
+        properties: { amount_eur: { type: 'number', minimum: 0 }, iban: { type: 'string', pattern: expect.stringMatching(/^\^/) } },
+      },
+    });
+    expect(pay).not.toHaveProperty('params');
+  });
+
+  it('declareTools: the whole surface again, complete, so a tool no longer had is marked so', async () => {
+    const { client, calls } = fakeClient(() => json({ did: 'did:x', recorded: 5, absent: 5, skipped: [], next: 'Recorded.' }));
+    const r = await declareTools(client, 'did:x', SUPPORT_SURFACE);
+    expect(r).toMatchObject({ recorded: 5, absent: 5 });
+    expect(calls[0]).toEqual({ name: 'declare_tools', args: { tools: toDeclaration(SUPPORT_SURFACE), complete: true, did: 'did:x' } });
+  });
+
+  it('toInputSchema: every fact a parameter states, an array\'s values bounding its elements', () => {
+    expect(
+      toInputSchema({
+        kinds: { type: 'array', items: 'string', enum: ['home', 'auto'], description: 'Which kinds', required: true },
+        amount: { type: 'number', description: 'How much', minimum: 0, maximum: 100, default: 10 },
+      }),
+    ).toEqual({
+      type: 'object',
+      properties: {
+        kinds: { type: 'array', items: { type: 'string', enum: ['home', 'auto'] }, description: 'Which kinds' },
+        amount: { type: 'number', description: 'How much', minimum: 0, maximum: 100, default: 10 },
+      },
+      required: ['kinds'],
+    });
   });
 
   it('proposeAction: the surface with its grantor params and rules, for this agent', async () => {

@@ -3,70 +3,94 @@
  * for documents, approves payouts and pays claimants, and flags suspected fraud.
  *
  * What the person bounds: the largest payout, and which kinds of claim the agent may approve.
- * Paying out is the dangerous verb — the organization can additionally put `pay_claimant` behind
- * a step-up when it publishes the action, and the agent then waits for the person's approval.
+ * Paying out is the dangerous verb, and the tool says so: it moves money to an account outside
+ * the insurer, and cannot be undone.
  */
 import type { AgentDef, World } from '../../lib/agent.js';
 import type { AgentSurface } from '../../lib/surface.js';
 
+/** Northwind's policy and claim numbers (P-1001, C-501), and the kinds of claim it handles. */
+const POLICY_ID = '^P-[0-9]{4}$';
+const CLAIM_ID = '^C-[0-9]{3,}$';
+const CLAIM_TYPES = ['home', 'auto', 'travel'];
+
 export const CLAIMS_SURFACE: AgentSurface = {
   name: 'northwind_claims',
   description: 'Northwind Mutual claims handling: open and assess claims, approve payouts within limits, pay claimants, flag fraud.',
+  service: 'Northwind back office',
   tools: [
     {
       name: 'open_claim',
+      title: 'Open a claim',
       description: 'Open a new claim on a policy.',
       params: {
-        policy_id: { type: 'string', description: 'The policy number', required: true },
-        claim_type: { type: 'string', description: 'home, auto or travel', required: true },
+        policy_id: { type: 'string', description: 'The policy number', pattern: POLICY_ID, required: true },
+        claim_type: { type: 'string', description: 'The kind of claim', enum: CLAIM_TYPES, required: true },
         description: { type: 'string', description: 'What happened', required: true },
       },
+      // Each call opens another claim.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     {
       name: 'request_documents',
+      title: 'Request documents',
       description: 'Ask the claimant for documents (photos, receipts, police report…).',
       params: {
-        claim_id: { type: 'string', description: 'The claim number', required: true },
+        claim_id: { type: 'string', description: 'The claim number', pattern: CLAIM_ID, required: true },
         documents: { type: 'array', items: 'string', description: 'What to ask for', required: true },
       },
+      // It writes to the claimant, who is outside the insurer.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     {
       name: 'assess_claim',
+      title: 'Assess a claim',
       description: "Assess a claim against the policy's cover and estimate what is owed.",
-      params: { claim_id: { type: 'string', description: 'The claim number', required: true } },
+      params: { claim_id: { type: 'string', description: 'The claim number', pattern: CLAIM_ID, required: true } },
+      // It records the estimate on the claim; assessing again gives the same one.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     {
       name: 'approve_payout',
+      title: 'Approve a payout',
       description: 'Approve paying a claim. Commits the insurer to paying this amount.',
       params: {
-        claim_id: { type: 'string', description: 'The claim number', required: true },
-        claim_type: { type: 'string', description: 'home, auto or travel', required: true },
-        amount_eur: { type: 'number', description: 'The amount approved, in euros', required: true },
+        claim_id: { type: 'string', description: 'The claim number', pattern: CLAIM_ID, required: true },
+        claim_type: { type: 'string', description: 'The kind of claim', enum: CLAIM_TYPES, required: true },
+        amount_eur: { type: 'number', description: 'The amount approved, in euros', minimum: 0, required: true },
       },
+      // The commitment is not undone by the agent.
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     {
       name: 'pay_claimant',
+      title: 'Pay a claimant',
       description: 'Send an approved payout to the claimant\'s bank account. Moves money.',
       params: {
-        claim_id: { type: 'string', description: 'The claim number', required: true },
-        amount_eur: { type: 'number', description: 'The amount, in euros', required: true },
-        iban: { type: 'string', description: "The claimant's IBAN", required: true },
+        claim_id: { type: 'string', description: 'The claim number', pattern: CLAIM_ID, required: true },
+        amount_eur: { type: 'number', description: 'The amount, in euros', minimum: 0, required: true },
+        iban: { type: 'string', description: "The claimant's IBAN", pattern: '^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$', required: true },
       },
+      // A transfer to another bank cannot be called back, and each call is another transfer.
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
     {
       name: 'flag_fraud',
+      title: 'Flag for fraud',
       description: 'Flag a claim for the fraud team to investigate. Pauses the claim.',
       params: {
-        claim_id: { type: 'string', description: 'The claim number', required: true },
+        claim_id: { type: 'string', description: 'The claim number', pattern: CLAIM_ID, required: true },
         reason: { type: 'string', description: 'What looks wrong', required: true },
       },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
   ],
   grantorParams: {
-    payout_limit: { type: 'number', description: 'The largest amount the assistant may approve or pay on one claim, in euros', suggested: 2500, required: true },
+    payout_limit: { type: 'number', description: 'The largest amount the assistant may approve or pay on one claim, in euros', minimum: 0, suggested: 2500, required: true },
     allowed_claim_types: {
       type: 'array',
       items: 'string',
+      enum: CLAIM_TYPES,
       description: 'The kinds of claim the assistant may approve on its own (home, auto, travel)',
       suggested: ['home', 'travel'],
       required: true,
@@ -173,7 +197,7 @@ When a call is BLOCKED, do not retry it — say plainly why and what a human nee
   makeWorld: makeClaimsWorld,
   scenarios: {
     routine: {
-      summary: 'Settle a €1,800 home claim end to end: assess, approve, pay (pay may need the person\'s approval).',
+      summary: 'Settle a €1,800 home claim end to end: assess, approve, pay.',
       steps: [
         { tool: 'assess_claim', args: { claim_id: 'C-501' }, note: 'assess the burst-pipe claim' },
         { tool: 'approve_payout', args: { claim_id: 'C-501', claim_type: 'home', amount_eur: 1800 }, note: 'approve €1,800 (inside the €2,500 limit)' },

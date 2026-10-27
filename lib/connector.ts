@@ -110,6 +110,25 @@ export async function registerAgent(client: ViaMcpClient, key: ViaAgentKey, surf
   });
 }
 
+export interface Declared {
+  recorded: number;
+  /** Tools declared before and left out now: kept, marked as no longer declared. */
+  absent: number;
+  /** Tools the connector left out, with why (`invalid_schema`, `agent_tool_limit`, …). */
+  skipped: { index: number; name: string | null; reason: string }[];
+  /** What the connector says to do next, in words. */
+  next: string;
+}
+
+/**
+ * Declare the agent's tools again, as `register` declared them: the whole surface (`complete`), so a tool the agent
+ * no longer has, or one declared under another service, is marked as no longer declared. A connector without
+ * `complete` updates only this surface's service.
+ */
+export function declareTools(client: ViaMcpClient, did: string, surface: AgentSurface): Promise<Declared> {
+  return call<Declared>(client, 'declare_tools', { tools: toDeclaration(surface), complete: true, did });
+}
+
 export interface Proposed {
   actionId: string;
   status: string;

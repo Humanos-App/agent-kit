@@ -58,7 +58,8 @@ mandate approves it.
 Each example has the same commands (replace `support` with `claims`):
 
 ```
-npm run support -- register                  # create the agent's key and register it
+npm run support -- register                  # create the agent's key and register it, with its tools
+npm run support -- declare                   # declare its tools again, after changing them
 npm run support -- propose                   # propose its action; publish it in the dashboard
 npm run support -- request <email> --wait    # the person approves the mandate
 npm run support -- status
@@ -98,7 +99,11 @@ approving a single call yet. It needs a connector with the organization's policy
 ## Build your own
 
 An agent is one definition ([`lib/agent.ts`](lib/agent.ts)): its tools, the limits the person
-sets, the rules, what the person is shown, and its tool implementations. `lib/` does the rest:
+sets, the rules, what the person is shown, and its tool implementations. Each tool is declared to
+Humanos as an MCP server describes one: a title, the service it comes from, the JSON Schema of
+its input (formats, patterns, allowed values, ranges) and hints on how it behaves (read-only,
+destructive, idempotent, reaching outside the organization). The organization sees them beside
+the tool, and Humanos assesses its risk from them. `lib/` does the rest:
 
 | | |
 |---|---|
