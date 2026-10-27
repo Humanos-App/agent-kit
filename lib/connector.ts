@@ -43,22 +43,50 @@ export interface ServerInfo {
 }
 
 /**
- * What `get_actor` returns: the actor's subject as the fold derives it from its chain (v0.3 §3.1,
- * §5).
+ * The VIAActor record (v0.3 §3.1): the actor's subject as the fold derives it from its chain (§5),
+ * and the position on that chain it was folded to. `status` is `active` / `suspended` / `retired`.
  * The organization an agent acts for is the `operator` POINTER to the org-signed AFFILIATION.
  */
-export interface ActorSummary {
+export interface ActorRecord {
   id: string;
   actorType: string;
   status: string;
   assurance?: string;
   binding?: string;
-  operator?: { org: string; relation?: string; affiliationEvent: string };
+  operator?: { org: string; relation?: string; validUntil?: string; affiliationEvent: string };
   keys?: unknown[];
+  chain: { genesisEvent: string; headEvent: string; sequence: number };
 }
 
-export function getActor(client: ViaMcpClient, did: string): Promise<ActorSummary> {
-  return call<ActorSummary>(client, 'get_actor', { did });
+/**
+ * What `get_actor` returns. `record` is null while the registration is still queued: the actor
+ * exists, its chain does not yet.
+ */
+export interface ActorSummary {
+  record: ActorRecord | null;
+  /** When the chain's last event was signed. Null with no chain. */
+  lastEventAt: string | null;
+  /** The actors merged into this one, each with the position of its own chain. */
+  retiredActors: { id: string; succeededBy: string | null; lastEventAt: string | null }[];
+}
+
+/** The tools a connector serves, read once per client: a newer connector drops some the kit calls. */
+const served = new WeakMap<ViaMcpClient, Promise<Set<string>>>();
+export function serves(client: ViaMcpClient, tool: string): Promise<boolean> {
+  let names = served.get(client);
+  if (!names) {
+    names = client.listTools().then((tools) => new Set(tools.map((t) => t.name)));
+    served.set(client, names);
+  }
+  return names.then((n) => n.has(tool));
+}
+
+/** The agent's record, or null where the connector reads no actor (`get_actor` left it with the policy release). */
+export async function getActor(client: ViaMcpClient, did: string): Promise<ActorSummary | null> {
+  if (!(await serves(client, 'get_actor'))) return null;
+  const answer = await call<ActorSummary | ActorRecord>(client, 'get_actor', { did });
+  // A connector deployed before 2026-10-13 answers the record's fields at the top, with no `record`.
+  return 'record' in answer ? answer : { record: answer, lastEventAt: null, retiredActors: [] };
 }
 
 export interface Registered {
@@ -71,10 +99,11 @@ export interface Registered {
 
 /** §16.5 (v0.3): challenge → evidence bound to the nonce → the platform grades the rung. */
 export async function registerAgent(client: ViaMcpClient, key: ViaAgentKey, surface: AgentSurface): Promise<Registered> {
-  const { regNonce } = await call<{ regNonce: string }>(client, 'register_challenge');
+  // `aud` is the platform DID the key's proof names (v0.3 §16.5).
+  const { regNonce, aud } = await call<{ regNonce: string; aud: string }>(client, 'register_challenge');
   return call<Registered>(client, 'register', {
     publicKeyJwk: key.publicJwk,
-    evidence: await key.evidence(regNonce),
+    evidence: await key.evidence(regNonce, aud),
     regNonce,
     tools: toDeclaration(surface),
   });
@@ -94,12 +123,27 @@ export function proposeAction(client: ViaMcpClient, did: string, surface: AgentS
 }
 
 export interface MandateKinds {
-  policies: { id: string; name: string; version: number; userParams: Record<string, unknown> }[];
+  /** `version` and `userParams` only from `list_mandate_kinds`; `get_policy` names a control by id and name. */
+  policies: { id: string; name: string; version?: number; userParams?: Record<string, unknown> }[];
   drafts: { id: string; name: string }[];
 }
 
-export function mandateKinds(client: ViaMcpClient): Promise<MandateKinds> {
-  return call<MandateKinds>(client, 'list_mandate_kinds');
+/** What `get_policy` answers, as far as the kit reads it: the mandate controls a person can grant each tool through. */
+interface AgentPolicyView {
+  tools: { tool: string; mandateControls?: { id: string; name: string }[] }[];
+}
+
+/**
+ * The published actions the agent can be granted a mandate under. A connector with the organization's policy
+ * dropped `list_mandate_kinds`: there they are the mandate controls `get_policy` lists for the agent's tools, and
+ * the drafts are not listed.
+ */
+export async function mandateKinds(client: ViaMcpClient, agentDid: string): Promise<MandateKinds> {
+  if (await serves(client, 'list_mandate_kinds')) return call<MandateKinds>(client, 'list_mandate_kinds');
+  if (!agentDid) return { policies: [], drafts: [] };
+  const view = await call<AgentPolicyView>(client, 'get_policy', { agentDid });
+  const controls = new Map(view.tools.flatMap((t) => t.mandateControls ?? []).map((c) => [c.id, c]));
+  return { policies: [...controls.values()], drafts: [] };
 }
 
 export interface MandateRequested {
@@ -125,8 +169,10 @@ export function requestPolicyMandate(
 
 export interface MandateStatus {
   mandateId: string;
+  kind: 'policy' | 'authorization';
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
   phase: 'PENDING' | 'ACTIVE' | 'REFUSED' | 'INACTIVE';
-  decisions: { contact: string; accepted: boolean; decidedAt: string }[];
+  boundAgentDids: string[];
 }
 
 export function mandateStatus(client: ViaMcpClient, mandateId: string): Promise<MandateStatus> {

@@ -8,7 +8,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { webcrypto } from 'node:crypto';
-import type { ViaAgentKey } from '@humanos/agent-sdk';
+import { registrationProof, type ViaAgentKey } from '@humanos/agent-sdk';
 
 const { subtle } = webcrypto;
 const EC = { name: 'ECDSA', namedCurve: 'P-256' } as const;
@@ -43,12 +43,17 @@ export async function storedSoftwareKey(file: string): Promise<StoredKey> {
     minted = true;
   }
   const signer = await subtle.importKey('jwk', stored.privateJwk, EC, false, ['sign']);
-  return {
+  const key: StoredKey = {
     publicJwk: stored.publicJwk as ViaAgentKey['publicJwk'],
     claimedAssurance: 'pop',
     claimedBinding: 'self',
     sign: async (bytes) => new Uint8Array(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, signer, bytes)),
-    evidence: async () => ({ type: 'none' }),
+    // Possession and nothing more: `device-self` with the key's own proof (v0.3 §16.5) — `none`
+    // is refused, or anyone could register a public key it does not hold.
+    evidence: async (regNonce, aud) => ({
+      type: 'device-self',
+      proof: await registrationProof(key, regNonce, aud),
+    }),
     get did() {
       return stored.did;
     },
@@ -58,4 +63,5 @@ export async function storedSoftwareKey(file: string): Promise<StoredKey> {
       writeFileSync(file, JSON.stringify(stored, null, 2), { mode: 0o600 });
     },
   };
+  return key;
 }
