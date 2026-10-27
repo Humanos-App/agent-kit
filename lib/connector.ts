@@ -170,7 +170,7 @@ export interface MandateKinds {
  */
 export async function mandateKinds(client: ViaMcpClient, agentDid: string): Promise<MandateKinds> {
   if (await serves(client, 'list_mandate_kinds')) return call<MandateKinds>(client, 'list_mandate_kinds');
-  if (!agentDid) return { policies: [], drafts: [], fromPolicy: true };
+  if (!agentDid) return { policies: [], drafts: [] };
   const view = await getPolicy(client, agentDid);
   const controls = new Map(view.tools.flatMap((t) => t.mandateControls ?? []).map((c) => [c.id, c]));
   return { policies: [...controls.values()], drafts: [], fromPolicy: true };

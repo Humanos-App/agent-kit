@@ -83,10 +83,10 @@ function logPolicy(view: AgentPolicyView): void {
 }
 
 /** Why the agent's action is not among those a mandate can be asked under. */
-function notOffered(def: AgentDef, kinds: MandateKinds): string {
+function notOffered(kinds: MandateKinds): string {
   return kinds.fromPolicy
-    ? `no tool takes a mandate under "${def.surface.name}": publish it in the dashboard, then set one of its tools to Delegate (under it, or under none), or leave it not set`
-    : `"${def.surface.name}" is not published — the organization publishes the proposed draft in the dashboard first`;
+    ? 'no tool takes a mandate under it yet — publish it in the dashboard, then set one of its tools to Delegate, or leave it not set'
+    : 'not published — the organization publishes the proposed draft in the dashboard first';
 }
 
 export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(2)): Promise<void> {
@@ -128,7 +128,7 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
       const draft = kinds.drafts.find((d) => d.name === def.surface.name);
       log(
         `action "${def.surface.name}": ${
-          mine ? `published${mine.version ? ` v${mine.version}` : ''}` : draft ? 'proposed, awaiting publication in the dashboard' : kinds.fromPolicy ? notOffered(def, kinds) : 'not proposed'
+          mine ? `published${mine.version ? ` v${mine.version}` : ''}` : draft ? 'proposed, awaiting publication in the dashboard' : kinds.fromPolicy ? notOffered(kinds) : 'not proposed'
         }`,
       );
       if (key.did && (await serves(client, 'get_policy'))) logPolicy(await getPolicy(client, key.did));
@@ -158,7 +158,7 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
       if (!contact) throw new Error('request <contact> — the email or phone of the person who authorizes');
       const kinds = await mandateKinds(client, key.did);
       const policy = kinds.policies.find((p) => p.name === def.surface.name);
-      if (!policy) throw new Error(notOffered(def, kinds));
+      if (!policy) throw new Error(`action "${def.surface.name}": ${notOffered(kinds)}`);
       const req = await requestPolicyMandate(client, {
         did: key.did,
         actionId: policy.id,
