@@ -31,9 +31,9 @@ organization.
    enforce them. The organization reviews and publishes it in the dashboard.
 3. **Mandate.** A person approves on the consent screen, setting the limits, and sees in plain
    words what the agent may do.
-4. **Act.** Every tool call is proved with the agent's key and verified against the mandate:
-   *allowed*, *denied* (the tool never runs), or *needs the person's approval* (a step-up). The
-   outcome of every allowed call is reported back.
+4. **Act.** Every tool call is proved with the agent's key and verified, against the mandate or,
+   with none, against the organization's policy: *allowed*, or *denied* and the tool never runs.
+   The outcome of every allowed call is reported back.
 
 ## Run it
 
@@ -76,8 +76,24 @@ npm run claims  -- run fraud                 # a flagged claim: the tool fails, 
 npm run support -- chat                      # a model picks the tools; each call is verified
 ```
 
-To see a person approve a single payment, publish the claims action with `pay_claimant` behind a
-step-up: the run pauses on it until they approve on their own device.
+### With no mandate: the organization's policy
+
+With no mandate held, `run` and `chat` verify each call on the organization's policy, which sets
+each tool's access in the dashboard. `--policy` does so while a mandate is held, and
+`--mandate <id>` picks one of several. `status` lists each tool's access.
+
+| Access | A call with no mandate |
+|---|---|
+| Allow | allowed |
+| Restrict | allowed within the control's rules; otherwise denied (`rule_failed`, …) |
+| Delegate, or not set | denied, `mandate_required`, naming the controls a person's mandate must be under |
+| Deny | denied, `policy_denied` |
+
+Under a mandate the policy still applies: Deny, and a Restrict whose rules the call breaks, refuse
+it; Allow never widens what the mandate grants.
+A call a person would have to approve is denied `stepup_required`: Humanos does not support
+approving a single call yet. It needs a connector with the organization's policy (one that serves
+`get_policy`); against one without, `--policy` stops and says so.
 
 ## Build your own
 
@@ -87,7 +103,8 @@ sets, the rules, what the person is shown, and its tool implementations. `lib/` 
 | | |
 |---|---|
 | [`lib/stored-key.ts`](lib/stored-key.ts) | the agent's key, kept across runs |
-| [`lib/connector.ts`](lib/connector.ts) | registration, proposals, mandate requests, step-ups |
+| [`lib/connector.ts`](lib/connector.ts) | registration, proposals, the organization's policy, mandate requests |
+| [`lib/guard.ts`](lib/guard.ts) | the guard every call goes through: under a mandate, or on the policy |
 | [`lib/surface.ts`](lib/surface.ts) | one tool definition → the proposal, the registration, the model's function list |
 | [`lib/runner.ts`](lib/runner.ts) | a guarded call as a result: allowed, denied, or failed |
 | [`lib/llm.ts`](lib/llm.ts) | the model loop; a deny goes back to the model as "do not retry" |
@@ -101,4 +118,5 @@ npm test
 
 Offline, against `@humanos/agent-sdk/testing`: an in-process verifier that checks each call's
 proof and evaluates the rules as Humanos does. The tests cover the rules, every scripted
-scenario, the step-up approved and declined, and that every allowed call's outcome is reported.
+scenario, a call that needs a person's approval, and that every allowed call's outcome is
+reported. Calls on the organization's policy run against a connector double.

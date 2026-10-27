@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ViaMcpClient, ViaToolResult } from '@humanos/agent-sdk';
 import { createViaMcpClient, ViaMcpAuthError } from '@humanos/agent-sdk';
-import { ConnectorRefusal, call, getActor, mandateKinds, proposeAction, registerAgent, requestPolicyMandate, waitForStepUp } from '../lib/connector.js';
+import { ConnectorRefusal, call, getActor, mandateKinds, proposeAction, registerAgent, requestPolicyMandate } from '../lib/connector.js';
 import { suggestedUserParams } from '../lib/surface.js';
 import { storedSoftwareKey } from '../lib/stored-key.js';
 import { loadEnv } from '../lib/env.js';
@@ -78,6 +78,8 @@ describe('connector', () => {
     const kinds = await mandateKinds(client, 'did:x');
     expect(kinds.policies.map((p) => [p.id, p.name])).toEqual([['urn:via:action:a', 'Claims']]);
     expect(calls.map((c) => c.name)).toEqual([tool]);
+    // Read from the policy, a missing action may be published with no tool taking a mandate under it.
+    expect(kinds.fromPolicy ?? false).toBe(tool === 'get_policy');
   });
 
   it('getActor: a connector from before 2026-10-13 answers the fields at the top, read as the record', async () => {
@@ -117,19 +119,6 @@ describe('connector', () => {
   it('suggestedUserParams keeps only what the published policy has', () => {
     expect(suggestedUserParams(SUPPORT_SURFACE, { credit_limit: {} })).toEqual({ credit_limit: 50 });
     expect(suggestedUserParams(SUPPORT_SURFACE)).toEqual({ credit_limit: 50, allow_contact_changes: true });
-  });
-
-  it('waitForStepUp: polls while pending, returns the decision', async () => {
-    const states = ['pending', 'pending', 'approved'];
-    const { client, calls } = fakeClient(() => json({ status: states.shift() }));
-    expect(await waitForStepUp(client, 's1', { sleep: async () => {} })).toBe('approved');
-    expect(calls).toHaveLength(3);
-    expect(calls[0]).toEqual({ name: 'stepup_status', args: { id: 's1' } });
-  });
-
-  it('waitForStepUp: gives up at the deadline', async () => {
-    const { client } = fakeClient(() => json({ status: 'pending' }));
-    expect(await waitForStepUp(client, 's1', { timeoutMs: 0, sleep: async () => {} })).toBe('timeout');
   });
 });
 

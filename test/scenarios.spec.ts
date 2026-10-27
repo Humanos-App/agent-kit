@@ -15,11 +15,12 @@ import type { AgentDef, World } from '../lib/agent.js';
 import { supportAgent, makeSupportWorld } from '../examples/support/agent.js';
 import { claimsAgent, makeClaimsWorld } from '../examples/claims/agent.js';
 
-async function run<W extends World>(def: AgentDef, scenario: string, world: W, opts: { stepUpTools?: string[]; approveStepUp?: boolean; userParams?: Record<string, unknown> } = {}) {
+async function run<W extends World>(def: AgentDef, scenario: string, world: W, opts: { stepUpTools?: string[]; userParams?: Record<string, unknown> } = {}) {
   const key = await storedSoftwareKey(join(mkdtempSync(join(tmpdir(), 'via-')), 'k.json'));
   const userParams = opts.userParams ?? Object.fromEntries(Object.entries(def.surface.grantorParams).map(([k, v]) => [k, v.suggested]));
   const p = createTestVerifier({ rules: def.surface.rules, userParams, agentKey: key, ...opts });
-  const guard = new ViaGuard({ mandate: p.mandate, agentKey: key, verifier: p.verifier, compiled: p.compiled, mode: 'enforce', onRechallenge: p.onRechallenge });
+  // As the kit builds it: no approval channel, because Humanos refuses a call a person would approve (`stepup_required`).
+  const guard = new ViaGuard({ mandate: p.mandate, agentKey: key, verifier: p.verifier, compiled: p.compiled, mode: 'enforce' });
   const results = await runSteps(guard, world, def.scenarios[scenario]!.steps);
   return { results, world, p };
 }
@@ -71,17 +72,9 @@ describe('claims agent', () => {
     everyAllowReported(p);
   });
 
-  it('routine with pay_claimant behind a step-up the person APPROVES — paid, after a rechallenge', async () => {
-    const { results, world, p } = await run(claimsAgent, 'routine', makeClaimsWorld(), { stepUpTools: ['pay_claimant'], approveStepUp: true });
-    expect(results[2]).toMatchObject({ tool: 'pay_claimant', decision: 'allow' });
-    expect(p.decisions.filter((d) => d.tool === 'pay_claimant').map((d) => d.decision)).toEqual(['rechallenge', 'allow']);
-    expect(world.payments).toHaveLength(1);
-    everyAllowReported(p);
-  });
-
-  it('routine with a step-up the person DECLINES — nothing is paid', async () => {
-    const { results, world } = await run(claimsAgent, 'routine', makeClaimsWorld(), { stepUpTools: ['pay_claimant'], approveStepUp: false });
-    expect(results[2]).toMatchObject({ tool: 'pay_claimant', decision: 'deny', reason: 'stepup_declined' });
+  it('routine with pay_claimant behind a person\'s approval — refused, nothing is paid', async () => {
+    const { results, world } = await run(claimsAgent, 'routine', makeClaimsWorld(), { stepUpTools: ['pay_claimant'] });
+    expect(results[2]).toMatchObject({ tool: 'pay_claimant', decision: 'deny' });
     expect(world.payments).toEqual([]);
     expect(world.claims['C-501']!.status).toBe('approved');
   });

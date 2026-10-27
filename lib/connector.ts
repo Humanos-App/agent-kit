@@ -1,7 +1,8 @@
 /**
- * The Humanos connector, typed: registration, proposals, mandate requests, status and step-up
- * polling, over the MCP client `@humanos/agent-sdk` provides. Every call is authenticated with the
- * organization's API key; a refusal is a `ConnectorRefusal` carrying the connector's own words.
+ * The Humanos connector, typed: registration, proposals, the organization's policy, mandate
+ * requests and status, over the MCP client `@humanos/agent-sdk` provides. Every call is
+ * authenticated with the organization's API key; a refusal is a `ConnectorRefusal` carrying the
+ * connector's own words.
  */
 import { createViaMcpClient, type ViaAgentKey, type ViaMcpClient } from '@humanos/agent-sdk';
 import { must } from './env.js';
@@ -122,28 +123,57 @@ export function proposeAction(client: ViaMcpClient, did: string, surface: AgentS
   return call<Proposed>(client, 'propose_action', { ...toProposal(surface), did });
 }
 
+/**
+ * A tool's access, as the organization's policy sets it for the agent (v0.3 §21.1). The dashboard calls them
+ * Allow, Restrict (`rules`), Delegate (`mandate`) and Deny; `not_set` when no entry names the tool.
+ */
+export type ToolAccess = 'allow' | 'rules' | 'mandate' | 'deny' | 'not_set';
+
+/** What `get_policy` answers: the organization's policy as it applies to the agent's declared tools. */
+export interface AgentPolicyView {
+  /** A refusal every call meets whatever the tool (`actor_suspended`, …); absent when the agent may act. */
+  standing?: string;
+  /** The version in force; null when the organization has published none, and every call needs a mandate. */
+  policy: { id: string; version: number } | null;
+  /** The control every call must also pass. */
+  everyCall?: { id: string; name: string };
+  tools: {
+    tool: string;
+    access: ToolAccess;
+    /** What the access means for the agent, in one sentence. */
+    meaning: string;
+    /** `rules`: the controls a call must pass. */
+    controls?: { id: string; name: string }[];
+    /** `mandate` and `not_set`: the mandate controls a person can grant the tool through. */
+    mandateControls?: { id: string; name: string }[];
+  }[];
+}
+
+export function getPolicy(client: ViaMcpClient, agentDid: string): Promise<AgentPolicyView> {
+  return call<AgentPolicyView>(client, 'get_policy', { agentDid });
+}
+
 export interface MandateKinds {
   /** `version` and `userParams` only from `list_mandate_kinds`; `get_policy` names a control by id and name. */
   policies: { id: string; name: string; version?: number; userParams?: Record<string, unknown> }[];
   drafts: { id: string; name: string }[];
-}
-
-/** What `get_policy` answers, as far as the kit reads it: the mandate controls a person can grant each tool through. */
-interface AgentPolicyView {
-  tools: { tool: string; mandateControls?: { id: string; name: string }[] }[];
+  /**
+   * Read from `get_policy`: only the controls a tool set to Delegate, or not set, takes a mandate under. A published
+   * action no such tool names is missing, and drafts are never listed.
+   */
+  fromPolicy?: boolean;
 }
 
 /**
  * The published actions the agent can be granted a mandate under. A connector with the organization's policy
- * dropped `list_mandate_kinds`: there they are the mandate controls `get_policy` lists for the agent's tools, and
- * the drafts are not listed.
+ * dropped `list_mandate_kinds`: there they are the mandate controls `get_policy` lists for the agent's tools.
  */
 export async function mandateKinds(client: ViaMcpClient, agentDid: string): Promise<MandateKinds> {
   if (await serves(client, 'list_mandate_kinds')) return call<MandateKinds>(client, 'list_mandate_kinds');
-  if (!agentDid) return { policies: [], drafts: [] };
-  const view = await call<AgentPolicyView>(client, 'get_policy', { agentDid });
+  if (!agentDid) return { policies: [], drafts: [], fromPolicy: true };
+  const view = await getPolicy(client, agentDid);
   const controls = new Map(view.tools.flatMap((t) => t.mandateControls ?? []).map((c) => [c.id, c]));
-  return { policies: [...controls.values()], drafts: [] };
+  return { policies: [...controls.values()], drafts: [], fromPolicy: true };
 }
 
 export interface MandateRequested {
@@ -177,26 +207,4 @@ export interface MandateStatus {
 
 export function mandateStatus(client: ViaMcpClient, mandateId: string): Promise<MandateStatus> {
   return call<MandateStatus>(client, 'mandate_status', { mandateId });
-}
-
-export type StepUpState = 'pending' | 'approved' | 'declined' | 'expired' | 'consumed';
-
-/**
- * v0.3 §17.4: wait for the person to decide a step-up. They approve on their own device, out of
- * band; the guard's `onRechallenge` resolves true once they have, so it awaits this.
- */
-export async function waitForStepUp(
-  client: ViaMcpClient,
-  id: string,
-  opts: { pollMs?: number; timeoutMs?: number; sleep?: (ms: number) => Promise<void> } = {},
-): Promise<StepUpState | 'timeout'> {
-  const pollMs = opts.pollMs ?? 2_000;
-  const deadline = Date.now() + (opts.timeoutMs ?? 10 * 60_000);
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  for (;;) {
-    const { status } = await call<{ status: StepUpState }>(client, 'stepup_status', { id });
-    if (status !== 'pending') return status;
-    if (Date.now() >= deadline) return 'timeout';
-    await sleep(pollMs);
-  }
 }
