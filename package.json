@@ -11,8 +11,8 @@
     "check-types": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@humanos/agent-sdk": "github:Humanos-App/agent-sdk#86e1893835ff8f89d081b26896c395bc6194a5bb",
-    "@humanos/via-sdk-v03": "https://raw.githubusercontent.com/Humanos-App/agent-sdk/86e1893835ff8f89d081b26896c395bc6194a5bb/vendor/humanos-via-sdk-v03-0.6.2.tgz"
+    "@humanos/agent-sdk": "github:Humanos-App/agent-sdk#26f18a8bf4336f4ab453f8537e96867217191a08",
+    "@humanos/via-sdk-v03": "https://raw.githubusercontent.com/Humanos-App/agent-sdk/26f18a8bf4336f4ab453f8537e96867217191a08/vendor/humanos-via-sdk-v03-0.6.2.tgz"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

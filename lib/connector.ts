@@ -4,7 +4,7 @@
  * authenticated with the organization's API key; a refusal is a `ConnectorRefusal` carrying the
  * connector's own words.
  */
-import { createViaMcpClient, type ViaAgentKey, type ViaMcpClient } from '@humanos/agent-sdk';
+import { createViaMcpClient, getPolicy, type ViaAgentKey, type ViaMcpClient } from '@humanos/agent-sdk';
 import { must } from './env.js';
 import { toDeclaration, toProposal, type AgentSurface } from './surface.js';
 
@@ -142,36 +142,6 @@ export function proposeAction(client: ViaMcpClient, did: string, surface: AgentS
   return call<Proposed>(client, 'propose_action', { ...toProposal(surface), did });
 }
 
-/**
- * A tool's access, as the organization's policy sets it for the agent (v0.3 §21.1). The dashboard calls them
- * Allow, Restrict (`rules`), Delegate (`mandate`) and Deny; `not_set` when no entry names the tool.
- */
-export type ToolAccess = 'allow' | 'rules' | 'mandate' | 'deny' | 'not_set';
-
-/** What `get_policy` answers: the organization's policy as it applies to the agent's declared tools. */
-export interface AgentPolicyView {
-  /** A refusal every call meets whatever the tool (`actor_suspended`, …); absent when the agent may act. */
-  standing?: string;
-  /** The version in force and its `default`, for a tool no entry sets; null when no policy decides the agent's calls. */
-  policy: { id: string; version: number; default: 'allow' | 'deny' } | null;
-  /** The control every call must also pass. */
-  everyCall?: { id: string; name: string };
-  tools: {
-    tool: string;
-    access: ToolAccess;
-    /** What the access means for the agent, in one sentence. */
-    meaning: string;
-    /** `rules`: the controls a call must pass. */
-    controls?: { id: string; name: string }[];
-    /** `mandate`: the mandate controls a person can grant the tool through. */
-    mandateControls?: { id: string; name: string }[];
-  }[];
-}
-
-export function getPolicy(client: ViaMcpClient, agentDid: string): Promise<AgentPolicyView> {
-  return call<AgentPolicyView>(client, 'get_policy', { agentDid });
-}
-
 export interface MandateKinds {
   /** `version` and `userParams` only from `list_mandate_kinds`; `get_policy` names a control by id and name. */
   policies: { id: string; name: string; version?: number; userParams?: Record<string, unknown> }[];
@@ -195,35 +165,3 @@ export async function mandateKinds(client: ViaMcpClient, agentDid: string): Prom
   return { policies: [...controls.values()], drafts: [], fromPolicy: true };
 }
 
-export interface MandateRequested {
-  mandateId: string;
-  status: string;
-  consentCard: { link?: string; terms: string; grantor: string; expiresAt: string; note: string };
-}
-
-export function requestPolicyMandate(
-  client: ViaMcpClient,
-  req: { did: string; actionId: string; userParams: Record<string, unknown>; contact: string; name: string; description: string },
-): Promise<MandateRequested> {
-  return call<MandateRequested>(client, 'request_mandate', {
-    kind: 'policy',
-    actionId: req.actionId,
-    userParams: req.userParams,
-    grantor: { contact: req.contact },
-    name: req.name,
-    description: req.description,
-    did: req.did,
-  });
-}
-
-export interface MandateStatus {
-  mandateId: string;
-  kind: 'policy' | 'authorization';
-  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
-  phase: 'PENDING' | 'ACTIVE' | 'REFUSED' | 'INACTIVE';
-  boundAgentDids: string[];
-}
-
-export function mandateStatus(client: ViaMcpClient, mandateId: string): Promise<MandateStatus> {
-  return call<MandateStatus>(client, 'mandate_status', { mandateId });
-}

@@ -32,7 +32,12 @@ export function toolMessage(r: StepResult): string {
   if (r.decision === 'deny') {
     if (r.reason === 'unknown_tool') return `ERROR: there is no tool called ${r.tool}.`;
     const why = `${r.reason}${r.failedRules ? `: ${r.failedRules.join(', ')}` : ''}`;
-    const needs = r.under ? ` It needs a person's mandate under one of: ${r.under.join(', ')}.` : '';
+    const under = r.request?.kind === 'guardrail' ? r.request.actionIds : r.under;
+    const needs = under?.length
+      ? ` It needs a person's mandate under one of: ${under.join(', ')}.`
+      : r.request?.kind === 'authorization'
+        ? " It needs a person's authorization for this one call."
+        : '';
     return `BLOCKED by Humanos (${why}).${needs} Nothing was done. Do not retry this call; explain to the user why it was blocked and what they can do instead.`;
   }
   if (r.error) return `FAILED: ${r.error}`;

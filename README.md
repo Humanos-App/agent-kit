@@ -89,11 +89,12 @@ control the policy names, else any covering the tool. `--mandate <id>` names the
 |---|---|
 | Allow | allowed |
 | Restrict | allowed within the control's rules; otherwise denied `policy_denied`, naming the rule it broke |
-| Delegate | decided by the person's mandate; with none, denied `mandate_required`, naming the controls it must be under |
+| Delegate | decided by the person's mandate; with none, denied `mandate_required`, naming the controls it must be under, or with no control asking for a person's authorization of that one call |
 | Deny | denied, `policy_denied` |
 | Not set | the policy's default: allowed, or denied `policy_denied` |
 
-A mandate a person has just granted is picked up on the next call: a `mandate_required` deny reads
+`request` asks under the agent's own control, its limits read with `getAction`, and `--wait` (or `wait <id>`) waits
+for the person's answer with agent-sdk's `waitForMandate`. A mandate a person has just granted is picked up on the next call: a `mandate_required` deny reads
 the policy and the mandates again, and the call is presented once more. A call a person would have
 to approve is denied `stepup_required`: Humanos does not support approving a single call yet. It
 needs a connector that decides policy first (agent-sdk 0.3, one that serves `get_policy`).
