@@ -3,7 +3,7 @@
  * and LLM) want. `ViaGuard.call` throws `ViaDeniedError` on a deny and rethrows tool errors after
  * reporting them, so every caller would otherwise write this same try/catch.
  */
-import { ViaDeniedError, type ViaGuard } from '@humanos/agent-sdk';
+import { ViaDeniedError, type MandateRequestHint, type ViaGuard } from '@humanos/agent-sdk';
 import type { Step, World } from './agent.js';
 
 export interface StepResult {
@@ -16,6 +16,8 @@ export interface StepResult {
   failedRules?: string[];
   /** On `mandate_required`: the controls a person's mandate must be under, any one of them (v0.3 §21.3). */
   under?: string[];
+  /** On `mandate_required`: what to ask a person for, a guardrail under a control or a one-call authorization. */
+  request?: MandateRequestHint;
   /** What the tool returned, when it ran. */
   result?: unknown;
   /** The tool ran and threw; the guard reported ACTION_FAILED. */
@@ -38,6 +40,7 @@ export async function guardedCall(guard: ViaGuard, world: World, tool: string, a
         reason: e.reason ?? 'denied',
         ...(failed.length ? { failedRules: failed } : {}),
         ...(e.under?.length ? { under: e.under.map((u) => u.id) } : {}),
+        ...(e.request ? { request: e.request } : {}),
       };
     }
     // The verifier allowed it and the tool itself failed — already reported as ACTION_FAILED.
@@ -64,9 +67,15 @@ export async function runSteps(
 export function describe(r: StepResult): string {
   const call = `${r.tool}(${JSON.stringify(r.args)})`;
   if (r.decision === 'deny') {
-    const under = r.under ? ` — a mandate under ${r.under.join(' or ')}` : '';
-    return `${call} → DENIED (${r.reason}${r.failedRules ? `: ${r.failedRules.join(', ')}` : ''})${under} — the tool never ran`;
+    return `${call} → DENIED (${r.reason}${r.failedRules ? `: ${r.failedRules.join(', ')}` : ''})${needs(r)} — the tool never ran`;
   }
   if (r.error) return `${call} → allowed, tool failed: ${r.error}`;
   return `${call} → allowed · ${typeof r.result === 'string' ? r.result : JSON.stringify(r.result)}`;
+}
+
+/** What a person must grant for the call: the controls it names, else a one-call authorization; nothing for any other deny. */
+function needs(r: StepResult): string {
+  const under = r.request?.kind === 'guardrail' ? r.request.actionIds : r.under;
+  if (under?.length) return ` — a mandate under ${under.join(' or ')}`;
+  return r.request?.kind === 'authorization' ? " — a person's authorization for this one call" : '';
 }
