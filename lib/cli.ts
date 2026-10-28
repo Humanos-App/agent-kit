@@ -9,9 +9,9 @@
  *   request <contact> [--wait]   ask a person for a policy mandate under the published action
  *   wait <mandateId>             poll until the person decides
  *   scenarios                    list the scripted scenarios (offline)
- *   run <scenario>               a scripted, reproducible run: under the held mandate, or with none
- *                                on the organization's policy (`--mandate <id>`, `--policy` to choose)
- *   chat                         a real LLM drives the tools; every call is verified (same flags)
+ *   run <scenario>               a scripted, reproducible run: the organization's policy decides each call,
+ *                                a held mandate presented for a tool it leaves to one (`--mandate <id>` names it)
+ *   chat                         a real LLM drives the tools; every call is verified (same flag)
  */
 import { createInterface } from 'node:readline/promises';
 import { join } from 'node:path';
@@ -59,35 +59,44 @@ async function pollMandate(client: ViaMcpClient, mandateId: string): Promise<voi
   }
 }
 
-/** `run` and `chat` choose the guard by `--mandate <id>` or `--policy`. */
-function guardOpts(args: string[]): { mandateId?: string; policy: boolean } {
+/** `run` and `chat` take `--mandate <id>`: the held mandate a tool the policy leaves to one presents. */
+function guardOpts(args: string[]): { mandateId?: string } {
   const mandateId = flag(args, '--mandate');
-  return { ...(mandateId ? { mandateId } : {}), policy: args.includes('--policy') };
+  return mandateId ? { mandateId } : {};
 }
 
 function acting(g: Guarded): string {
-  return g.mandateId ? `acting under ${g.mandateId}` : "acting with no mandate, on the organization's policy";
+  return g.mandateId
+    ? `the organization's policy decides each call; ${g.mandateId} is presented for a tool it leaves to a mandate`
+    : "the organization's policy decides each call; a held mandate is presented for a tool it leaves to one";
 }
 
-/** The dashboard's names for a tool's access. */
-const ACCESS: Record<ToolAccess, string> = { allow: 'Allow', rules: 'Restrict', mandate: 'Delegate', deny: 'Deny', not_set: 'not set' };
+/** The dashboard's names for a tool's access; a tool not set reads by the policy's default. */
+const ACCESS: Record<Exclude<ToolAccess, 'not_set'>, string> = { allow: 'Allow', rules: 'Restrict', mandate: 'Delegate', deny: 'Deny' };
+const BY_DEFAULT = { allow: 'Allowed by default', deny: 'Blocked by default' } as const;
 
-/** The policy in force, and each declared tool's access by its dashboard name, with the controls behind it. */
+/** The policy in force and its default, and each declared tool's access by its dashboard name, with the controls behind it. */
 function logPolicy(view: AgentPolicyView): void {
-  log(view.policy ? `policy v${view.policy.version} (${view.policy.id})` : "no policy published: every call needs a person's mandate");
+  const byDefault = view.policy?.default ?? 'allow';
+  log(
+    view.policy
+      ? `policy v${view.policy.version} (${view.policy.id}), a tool not set: ${BY_DEFAULT[byDefault].toLowerCase()}`
+      : 'no policy decides these calls: every call is refused',
+  );
   if (view.standing) log(`  every call is refused: ${view.standing}`);
   if (view.everyCall) log(`  every call also passes ${view.everyCall.name}`);
   const width = Math.max(0, ...view.tools.map((t) => t.tool.length));
   for (const t of view.tools) {
     const names = (t.access === 'rules' ? t.controls : t.mandateControls)?.map((c) => c.name) ?? [];
-    log(`  ${t.tool.padEnd(width)}  ${ACCESS[t.access]}${names.length ? ` · ${names.join(', ')}` : ''}`);
+    const access = t.access === 'not_set' ? BY_DEFAULT[byDefault] : ACCESS[t.access];
+    log(`  ${t.tool.padEnd(width)}  ${access}${names.length ? ` · ${names.join(', ')}` : ''}`);
   }
 }
 
 /** Why the agent's action is not among those a mandate can be asked under. */
 function notOffered(kinds: MandateKinds): string {
   return kinds.fromPolicy
-    ? 'no tool takes a mandate under it yet — publish it in the dashboard, then set one of its tools to Delegate, or leave it not set'
+    ? 'no tool takes a mandate under it yet — publish it in the dashboard, then set one of its tools to Delegate'
     : 'not published — the organization publishes the proposed draft in the dashboard first';
 }
 
@@ -195,18 +204,20 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
       const name = rest.find((a) => !a.startsWith('--')) ?? 'routine';
       const scenario = def.scenarios[name];
       if (!scenario) throw new Error(`no scenario "${name}" — try \`scenarios\``);
-      const guarded = await guardFor(def, client, key, guardOpts(rest));
+      const guarded = await guardFor(client, key, guardOpts(rest));
       log(`${def.label} · scenario "${name}": ${scenario.summary}`);
       log(acting(guarded));
       const results = await runSteps(guarded.guard, def.makeWorld(), scenario.steps, log);
       const denied = results.filter((r) => r.decision === 'deny').length;
-      const chain = guarded.mandateId ? "the mandate's chain" : "the agent's chain, under the policy";
-      log(`done: ${results.length - denied} allowed, ${denied} denied — every decision and outcome is on ${chain}`);
+      log(
+        `done: ${results.length - denied} allowed, ${denied} denied — every decision and outcome is on the agent's chain under the policy, ` +
+          "or the mandate's when one decided it",
+      );
       return;
     }
 
     case 'chat': {
-      const guarded = await guardFor(def, client, key, guardOpts(rest));
+      const guarded = await guardFor(client, key, guardOpts(rest));
       const { guard } = guarded;
       const callModel = openRouter({ apiKey: must('OPENROUTER_API_KEY'), model: process.env.VIA_AGENT_MODEL, title: def.label });
       const world = def.makeWorld();

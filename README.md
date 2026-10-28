@@ -31,8 +31,9 @@ organization.
    enforce them. The organization reviews and publishes it in the dashboard.
 3. **Mandate.** A person approves on the consent screen, setting the limits, and sees in plain
    words what the agent may do.
-4. **Act.** Every tool call is proved with the agent's key and verified, against the mandate or,
-   with none, against the organization's policy: *allowed*, or *denied* and the tool never runs.
+4. **Act.** Every tool call is proved with the agent's key and verified on the organization's
+   policy, and against the mandate for a tool the policy leaves to one: *allowed*, or *denied* and
+   the tool never runs.
    The outcome of every allowed call is reported back.
 
 ## Run it
@@ -77,24 +78,25 @@ npm run claims  -- run fraud                 # a flagged claim: the tool fails, 
 npm run support -- chat                      # a model picks the tools; each call is verified
 ```
 
-### With no mandate: the organization's policy
+### The organization's policy decides first
 
-With no mandate held, `run` and `chat` verify each call on the organization's policy, which sets
-each tool's access in the dashboard. `--policy` does so while a mandate is held, and
-`--mandate <id>` picks one of several. `status` lists each tool's access.
+`run` and `chat` verify each call on the organization's policy, which sets each tool's access in
+the dashboard. A mandate the agent holds is presented only for a tool set to Delegate: one on the
+control the policy names, else any covering the tool. `--mandate <id>` names the one to present.
+`status` lists each tool's access and the policy's default.
 
-| Access | A call with no mandate |
+| Access | A call |
 |---|---|
 | Allow | allowed |
 | Restrict | allowed within the control's rules; otherwise denied (`rule_failed`, …) |
-| Delegate, or not set | denied, `mandate_required`, naming the controls a person's mandate must be under |
+| Delegate | decided by the person's mandate; with none, denied `mandate_required`, naming the controls it must be under |
 | Deny | denied, `policy_denied` |
+| Not set | the policy's default: allowed, or denied `policy_denied` |
 
-Under a mandate the policy still applies: Deny, and a Restrict whose rules the call breaks, refuse
-it; Allow never widens what the mandate grants.
-A call a person would have to approve is denied `stepup_required`: Humanos does not support
-approving a single call yet. It needs a connector with the organization's policy (one that serves
-`get_policy`); against one without, `--policy` stops and says so.
+A mandate a person has just granted is picked up on the next call: a `mandate_required` deny reads
+the policy and the mandates again, and the call is presented once more. A call a person would have
+to approve is denied `stepup_required`: Humanos does not support approving a single call yet. It
+needs a connector that decides policy first (agent-sdk 0.3, one that serves `get_policy`).
 
 ## Build your own
 
@@ -109,7 +111,7 @@ the tool, and Humanos assesses its risk from them. `lib/` does the rest:
 |---|---|
 | [`lib/stored-key.ts`](lib/stored-key.ts) | the agent's key, kept across runs |
 | [`lib/connector.ts`](lib/connector.ts) | registration, proposals, the organization's policy, mandate requests |
-| [`lib/guard.ts`](lib/guard.ts) | the guard every call goes through: under a mandate, or on the policy |
+| [`lib/guard.ts`](lib/guard.ts) | the guard every call goes through: the policy first, a mandate for a tool it leaves to one |
 | [`lib/surface.ts`](lib/surface.ts) | one tool definition → the proposal, the registration, the model's function list |
 | [`lib/runner.ts`](lib/runner.ts) | a guarded call as a result: allowed, denied, or failed |
 | [`lib/llm.ts`](lib/llm.ts) | the model loop; a deny goes back to the model as "do not retry" |

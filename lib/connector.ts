@@ -152,8 +152,8 @@ export type ToolAccess = 'allow' | 'rules' | 'mandate' | 'deny' | 'not_set';
 export interface AgentPolicyView {
   /** A refusal every call meets whatever the tool (`actor_suspended`, …); absent when the agent may act. */
   standing?: string;
-  /** The version in force; null when the organization has published none, and every call needs a mandate. */
-  policy: { id: string; version: number } | null;
+  /** The version in force and its `default`, for a tool no entry sets; null when no policy decides the agent's calls. */
+  policy: { id: string; version: number; default: 'allow' | 'deny' } | null;
   /** The control every call must also pass. */
   everyCall?: { id: string; name: string };
   tools: {
@@ -163,7 +163,7 @@ export interface AgentPolicyView {
     meaning: string;
     /** `rules`: the controls a call must pass. */
     controls?: { id: string; name: string }[];
-    /** `mandate` and `not_set`: the mandate controls a person can grant the tool through. */
+    /** `mandate`: the mandate controls a person can grant the tool through. */
     mandateControls?: { id: string; name: string }[];
   }[];
 }
@@ -177,7 +177,7 @@ export interface MandateKinds {
   policies: { id: string; name: string; version?: number; userParams?: Record<string, unknown> }[];
   drafts: { id: string; name: string }[];
   /**
-   * Read from `get_policy`: only the controls a tool set to Delegate, or not set, takes a mandate under. A published
+   * Read from `get_policy`: only the controls a tool set to Delegate takes a mandate under. A published
    * action no such tool names is missing, and drafts are never listed.
    */
   fromPolicy?: boolean;

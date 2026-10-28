@@ -8,19 +8,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ViaGuard } from '@humanos/agent-sdk';
-import { createTestVerifier } from '@humanos/agent-sdk/testing';
+import { createTestVerifier, type TestVerifierOptions } from '@humanos/agent-sdk/testing';
 import { storedSoftwareKey } from '../lib/stored-key.js';
 import { runSteps } from '../lib/runner.js';
 import type { AgentDef, World } from '../lib/agent.js';
 import { supportAgent, makeSupportWorld } from '../examples/support/agent.js';
 import { claimsAgent, makeClaimsWorld } from '../examples/claims/agent.js';
 
-async function run<W extends World>(def: AgentDef, scenario: string, world: W, opts: { stepUpTools?: string[]; userParams?: Record<string, unknown> } = {}) {
+async function run<W extends World>(def: AgentDef, scenario: string, world: W, opts: Pick<TestVerifierOptions, 'policy'> & { userParams?: Record<string, unknown> } = {}) {
   const key = await storedSoftwareKey(join(mkdtempSync(join(tmpdir(), 'via-')), 'k.json'));
   const userParams = opts.userParams ?? Object.fromEntries(Object.entries(def.surface.grantorParams).map(([k, v]) => [k, v.suggested]));
   const p = createTestVerifier({ rules: def.surface.rules, userParams, agentKey: key, ...opts });
-  // As the kit builds it: no approval channel, because Humanos refuses a call a person would approve (`stepup_required`).
-  const guard = new ViaGuard({ mandate: p.mandate, agentKey: key, verifier: p.verifier, compiled: p.compiled, mode: 'enforce' });
+  const guard = new ViaGuard({ mandate: p.mandate, agentKey: key, agentDid: 'did:web:humanos.tech:agent:test', verifier: p.verifier, compiled: p.compiled, mode: 'enforce' });
   const results = await runSteps(guard, world, def.scenarios[scenario]!.steps);
   return { results, world, p };
 }
@@ -72,9 +71,11 @@ describe('claims agent', () => {
     everyAllowReported(p);
   });
 
-  it('routine with pay_claimant behind a person\'s approval — refused, nothing is paid', async () => {
-    const { results, world } = await run(claimsAgent, 'routine', makeClaimsWorld(), { stepUpTools: ['pay_claimant'] });
-    expect(results[2]).toMatchObject({ tool: 'pay_claimant', decision: 'deny' });
+  it('routine with pay_claimant denied by the organization\'s policy — refused though the mandate allows it, nothing is paid', async () => {
+    const policy = { tools: { assess_claim: 'mandate', approve_payout: 'mandate', pay_claimant: 'deny' } } as const;
+    const { results, world } = await run(claimsAgent, 'routine', makeClaimsWorld(), { policy });
+    expect(summary(results)).toEqual(['assess_claim:allow', 'approve_payout:allow', 'pay_claimant:deny']);
+    expect(results[2]).toMatchObject({ reason: 'policy_denied' });
     expect(world.payments).toEqual([]);
     expect(world.claims['C-501']!.status).toBe('approved');
   });
