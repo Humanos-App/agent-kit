@@ -88,7 +88,7 @@ control the policy names, else any covering the tool. `--mandate <id>` names the
 | Access | A call |
 |---|---|
 | Allow | allowed |
-| Restrict | allowed within the control's rules; otherwise denied (`rule_failed`, …) |
+| Restrict | allowed within the control's rules; otherwise denied `policy_denied`, naming the rule it broke |
 | Delegate | decided by the person's mandate; with none, denied `mandate_required`, naming the controls it must be under |
 | Deny | denied, `policy_denied` |
 | Not set | the policy's default: allowed, or denied `policy_denied` |

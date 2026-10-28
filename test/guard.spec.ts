@@ -101,7 +101,7 @@ describe('guardFor', () => {
 describe('a deny on the policy', () => {
   it.each([
     ['Deny', { decision: 'deny', reason: 'policy_denied', evaluations: [] }, { reason: 'policy_denied' }],
-    ['Restrict, a rule broken', { decision: 'deny', reason: 'rule_failed', evaluations: [{ rule: 'credit_cap', result: 'fail' }] }, { reason: 'rule_failed', failedRules: ['credit_cap'] }],
+    ['Restrict, a rule broken', { decision: 'deny', reason: 'policy_denied', evaluations: [{ rule: 'credit_cap', result: 'fail' }] }, { reason: 'policy_denied', failedRules: ['credit_cap'] }],
     ['Delegate', { decision: 'deny', reason: 'mandate_required', evaluations: [], under: [{ id: SUPPORT_DESK }] }, { reason: 'mandate_required', under: [SUPPORT_DESK] }],
   ])('%s — the tool never runs, and the result says why', async (_access, answer, expected) => {
     const world = makeSupportWorld();
