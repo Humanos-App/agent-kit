@@ -30,7 +30,7 @@ describe('storedSoftwareKey — a key that survives the process', () => {
     await storedSoftwareKey(f);
     const key = await storedSoftwareKey(f);
     const t = createTestVerifier({ rules: [], userParams: {}, agentKey: key });
-    const guard = new ViaGuard({ mandate: t.mandate, agentKey: key, verifier: t.verifier, compiled: t.compiled });
+    const guard = new ViaGuard({ mandate: t.mandate, agentKey: key, agentDid: 'did:web:humanos.tech:agent:x', verifier: t.verifier, compiled: t.compiled });
     expect((await guard.call('ping', {}, () => 'pong')).decision).toBe('allow');
     expect(t.outcomes).toHaveLength(1); // the outcome report carries a proof too
   });

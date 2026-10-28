@@ -8,49 +8,67 @@
 import type { AgentDef, World } from '../../lib/agent.js';
 import type { AgentSurface } from '../../lib/surface.js';
 
+/** Northwind's policy and claim numbers: P-1001, C-501. */
+const POLICY_ID = '^P-[0-9]{4}$';
+const CLAIM_ID = '^C-[0-9]{3,}$';
+
 export const SUPPORT_SURFACE: AgentSurface = {
   name: 'northwind_customer_support',
   description: 'Northwind Mutual customer support: answer policyholders, update their contact details, and issue small goodwill credits.',
+  service: 'Northwind back office',
   tools: [
     {
       name: 'lookup_policy',
+      title: 'Look up a policy',
       description: "Look up a policyholder's policy: its type, status and cover.",
-      params: { policy_id: { type: 'string', description: 'The policy number, e.g. P-1001', required: true } },
+      params: { policy_id: { type: 'string', description: 'The policy number, e.g. P-1001', pattern: POLICY_ID, required: true } },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     {
       name: 'get_claim_status',
+      title: "Get a claim's status",
       description: 'Tell a policyholder where their claim stands.',
-      params: { claim_id: { type: 'string', description: 'The claim number, e.g. C-501', required: true } },
+      params: { claim_id: { type: 'string', description: 'The claim number, e.g. C-501', pattern: CLAIM_ID, required: true } },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     {
       name: 'update_contact',
+      title: 'Update contact details',
       description: "Change the email or phone number on a policyholder's file.",
       params: {
-        policy_id: { type: 'string', description: 'The policy number', required: true },
-        email: { type: 'string', description: 'The new email address' },
-        phone: { type: 'string', description: 'The new phone number' },
+        policy_id: { type: 'string', description: 'The policy number', pattern: POLICY_ID, required: true },
+        email: { type: 'string', description: 'The new email address', format: 'email' },
+        phone: { type: 'string', description: 'The new phone number, with its country code, e.g. +351 910 000 001', pattern: '^\\+[0-9 ]{8,20}$' },
       },
+      // It overwrites the number or address on file.
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     {
       name: 'issue_goodwill_credit',
+      title: 'Issue a goodwill credit',
       description: "Credit a policyholder's account as an apology, e.g. for a delay. This gives away the insurer's money.",
       params: {
-        policy_id: { type: 'string', description: 'The policy number', required: true },
-        amount_eur: { type: 'number', description: 'How much to credit, in euros', required: true },
+        policy_id: { type: 'string', description: 'The policy number', pattern: POLICY_ID, required: true },
+        amount_eur: { type: 'number', description: 'How much to credit, in euros', minimum: 0, required: true },
         reason: { type: 'string', description: 'Why the credit is given', required: true },
       },
+      // Each call credits the account again.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     {
       name: 'escalate_to_human',
+      title: 'Escalate to a human',
       description: 'Hand the conversation to a human agent, with a summary.',
       params: {
-        policy_id: { type: 'string', description: 'The policy number', required: true },
+        policy_id: { type: 'string', description: 'The policy number', pattern: POLICY_ID, required: true },
         summary: { type: 'string', description: 'What the customer needs', required: true },
       },
+      // Each call opens another ticket.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
   ],
   grantorParams: {
-    credit_limit: { type: 'number', description: 'The largest goodwill credit the assistant may give in one go, in euros', suggested: 50, required: true },
+    credit_limit: { type: 'number', description: 'The largest goodwill credit the assistant may give in one go, in euros', minimum: 0, suggested: 50, required: true },
     allow_contact_changes: { type: 'boolean', description: "Whether the assistant may change a customer's email or phone number", suggested: true, required: true },
   },
   rules: [

@@ -31,7 +31,9 @@ export function openRouter(opts: { apiKey: string; model?: string; title?: strin
 export function toolMessage(r: StepResult): string {
   if (r.decision === 'deny') {
     if (r.reason === 'unknown_tool') return `ERROR: there is no tool called ${r.tool}.`;
-    return `BLOCKED by the person's mandate (${r.reason}${r.failedRules ? `: ${r.failedRules.join(', ')}` : ''}). Nothing was done. Do not retry this call; explain to the user why it was blocked and what they can do instead.`;
+    const why = `${r.reason}${r.failedRules ? `: ${r.failedRules.join(', ')}` : ''}`;
+    const needs = r.under ? ` It needs a person's mandate under one of: ${r.under.join(', ')}.` : '';
+    return `BLOCKED by Humanos (${why}).${needs} Nothing was done. Do not retry this call; explain to the user why it was blocked and what they can do instead.`;
   }
   if (r.error) return `FAILED: ${r.error}`;
   return typeof r.result === 'string' ? r.result : JSON.stringify(r.result);

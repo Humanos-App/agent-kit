@@ -10,10 +10,12 @@ export interface StepResult {
   tool: string;
   args: Record<string, unknown>;
   decision: 'allow' | 'deny';
-  /** Why it was denied (`rule_failed`, `stepup_declined`, …). */
+  /** Why it was denied (`policy_denied`, `rule_failed`, `mandate_required`, …). */
   reason?: string;
   /** The rules that failed, on a rule deny. */
   failedRules?: string[];
+  /** On `mandate_required`: the controls a person's mandate must be under, any one of them (v0.3 §21.3). */
+  under?: string[];
   /** What the tool returned, when it ran. */
   result?: unknown;
   /** The tool ran and threw; the guard reported ACTION_FAILED. */
@@ -29,7 +31,14 @@ export async function guardedCall(guard: ViaGuard, world: World, tool: string, a
   } catch (e) {
     if (e instanceof ViaDeniedError) {
       const failed = e.evaluations.filter((ev) => ev.result === 'fail' || ev.result === 'error').map((ev) => ev.rule);
-      return { tool, args, decision: 'deny', reason: e.reason ?? 'denied', ...(failed.length ? { failedRules: failed } : {}) };
+      return {
+        tool,
+        args,
+        decision: 'deny',
+        reason: e.reason ?? 'denied',
+        ...(failed.length ? { failedRules: failed } : {}),
+        ...(e.under?.length ? { under: e.under.map((u) => u.id) } : {}),
+      };
     }
     // The verifier allowed it and the tool itself failed — already reported as ACTION_FAILED.
     return { tool, args, decision: 'allow', error: e instanceof Error ? e.message : String(e) };
@@ -54,7 +63,10 @@ export async function runSteps(
 
 export function describe(r: StepResult): string {
   const call = `${r.tool}(${JSON.stringify(r.args)})`;
-  if (r.decision === 'deny') return `${call} → DENIED (${r.reason}${r.failedRules ? `: ${r.failedRules.join(', ')}` : ''}) — the tool never ran`;
+  if (r.decision === 'deny') {
+    const under = r.under ? ` — a mandate under ${r.under.join(' or ')}` : '';
+    return `${call} → DENIED (${r.reason}${r.failedRules ? `: ${r.failedRules.join(', ')}` : ''})${under} — the tool never ran`;
+  }
   if (r.error) return `${call} → allowed, tool failed: ${r.error}`;
   return `${call} → allowed · ${typeof r.result === 'string' ? r.result : JSON.stringify(r.result)}`;
 }

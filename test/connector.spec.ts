@@ -7,8 +7,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ViaMcpClient, ViaToolResult } from '@humanos/agent-sdk';
 import { createViaMcpClient, ViaMcpAuthError } from '@humanos/agent-sdk';
-import { ConnectorRefusal, call, getActor, mandateKinds, proposeAction, registerAgent, requestPolicyMandate, waitForStepUp } from '../lib/connector.js';
-import { suggestedUserParams } from '../lib/surface.js';
+import { ConnectorRefusal, call, declareTools, getActor, mandateKinds, proposeAction, registerAgent, requestPolicyMandate } from '../lib/connector.js';
+import { suggestedUserParams, toDeclaration, toInputSchema } from '../lib/surface.js';
+import { errorLine } from '../lib/cli.js';
 import { storedSoftwareKey } from '../lib/stored-key.js';
 import { loadEnv } from '../lib/env.js';
 import { writeFileSync } from 'node:fs';
@@ -78,6 +79,8 @@ describe('connector', () => {
     const kinds = await mandateKinds(client, 'did:x');
     expect(kinds.policies.map((p) => [p.id, p.name])).toEqual([['urn:via:action:a', 'Claims']]);
     expect(calls.map((c) => c.name)).toEqual([tool]);
+    // Read from the policy, a missing action may be published with no tool taking a mandate under it.
+    expect(kinds.fromPolicy ?? false).toBe(tool === 'get_policy');
   });
 
   it('getActor: a connector from before 2026-10-13 answers the fields at the top, read as the record', async () => {
@@ -93,12 +96,48 @@ describe('connector', () => {
     const reg = await registerAgent(client, key, CLAIMS_SURFACE);
     expect(reg.did).toBe('did:x');
     expect(calls.map((c) => c.name)).toEqual(['register_challenge', 'register']);
-    const args = calls[1]!.args as { publicKeyJwk: Record<string, string>; regNonce: string; evidence: unknown; tools: { name: string }[] };
+    const args = calls[1]!.args as { publicKeyJwk: Record<string, string>; regNonce: string; evidence: unknown; tools: Record<string, unknown>[] };
     expect(args.regNonce).toBe('n-1');
     // The key proves it is held: a via-reg+jwt over the nonce and the platform DID (v0.3 §16.5).
     expect(args.evidence).toMatchObject({ type: 'device-self', proof: expect.stringMatching(/^ey/) });
     expect(args.publicKeyJwk).not.toHaveProperty('d'); // the private half never leaves
     expect(args.tools.map((t) => t.name)).toEqual(CLAIMS_SURFACE.tools.map((t) => t.name));
+    // Each tool as an MCP server describes one — title, service, input schema, hints — never the legacy flat params.
+    const pay = args.tools.find((t) => t.name === 'pay_claimant');
+    expect(pay).toMatchObject({
+      title: 'Pay a claimant',
+      service: 'Northwind back office',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      inputSchema: {
+        type: 'object',
+        required: ['claim_id', 'amount_eur', 'iban'],
+        properties: { amount_eur: { type: 'number', minimum: 0 }, iban: { type: 'string', pattern: expect.stringMatching(/^\^/) } },
+      },
+    });
+    expect(pay).not.toHaveProperty('params');
+  });
+
+  it('declareTools: the whole surface again, complete, so a tool no longer had is marked so', async () => {
+    const { client, calls } = fakeClient(() => json({ did: 'did:x', recorded: 5, absent: 5, skipped: [], next: 'Recorded.' }));
+    const r = await declareTools(client, 'did:x', SUPPORT_SURFACE);
+    expect(r).toMatchObject({ recorded: 5, absent: 5 });
+    expect(calls[0]).toEqual({ name: 'declare_tools', args: { tools: toDeclaration(SUPPORT_SURFACE), complete: true, did: 'did:x' } });
+  });
+
+  it('toInputSchema: every fact a parameter states, an array\'s values bounding its elements', () => {
+    expect(
+      toInputSchema({
+        kinds: { type: 'array', items: 'string', enum: ['home', 'auto'], description: 'Which kinds', required: true },
+        amount: { type: 'number', description: 'How much', minimum: 0, maximum: 100, default: 10 },
+      }),
+    ).toEqual({
+      type: 'object',
+      properties: {
+        kinds: { type: 'array', items: { type: 'string', enum: ['home', 'auto'] }, description: 'Which kinds' },
+        amount: { type: 'number', description: 'How much', minimum: 0, maximum: 100, default: 10 },
+      },
+      required: ['kinds'],
+    });
   });
 
   it('proposeAction: the surface with its grantor params and rules, for this agent', async () => {
@@ -117,19 +156,6 @@ describe('connector', () => {
   it('suggestedUserParams keeps only what the published policy has', () => {
     expect(suggestedUserParams(SUPPORT_SURFACE, { credit_limit: {} })).toEqual({ credit_limit: 50 });
     expect(suggestedUserParams(SUPPORT_SURFACE)).toEqual({ credit_limit: 50, allow_contact_changes: true });
-  });
-
-  it('waitForStepUp: polls while pending, returns the decision', async () => {
-    const states = ['pending', 'pending', 'approved'];
-    const { client, calls } = fakeClient(() => json({ status: states.shift() }));
-    expect(await waitForStepUp(client, 's1', { sleep: async () => {} })).toBe('approved');
-    expect(calls).toHaveLength(3);
-    expect(calls[0]).toEqual({ name: 'stepup_status', args: { id: 's1' } });
-  });
-
-  it('waitForStepUp: gives up at the deadline', async () => {
-    const { client } = fakeClient(() => json({ status: 'pending' }));
-    expect(await waitForStepUp(client, 's1', { timeoutMs: 0, sleep: async () => {} })).toBe('timeout');
   });
 });
 
@@ -155,6 +181,25 @@ describe('connector HTTP errors, through the SDK client', () => {
     const body = { error: 'invalid_token', error_description: 'invalid token' };
     const error = await answering(401, body, { 'WWW-Authenticate': challenge }).listTools().catch((e: unknown) => e);
     expect(error).toMatchObject({ status: 401, body, message: `credential refused (HTTP 401): invalid token [${challenge}]` });
+  });
+
+  it('a connector never reached names the URL and the reason, which fetch keeps in its cause', async () => {
+    const refused = (url: string) =>
+      createViaMcpClient({
+        url,
+        apiKey: 'key',
+        signatureSecret: 'secret',
+        fetchImpl: async () => {
+          throw new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 127.0.0.1:4006') });
+        },
+      })
+        .listTools()
+        .catch((e: unknown) => e);
+    const local = 'http://localhost:4006/mcp';
+    expect(errorLine(await refused(local), local)).toBe(`could not reach the connector at ${local}: connect ECONNREFUSED 127.0.0.1:4006`);
+    const tls = 'https://localhost:4005/mcp';
+    expect(errorLine(await refused(tls), tls)).toMatch(/serves http, not https$/);
+    expect(errorLine(new Error('register first'))).toBe('register first');
   });
 
   it('any other HTTP failure names the server\'s reason', async () => {
