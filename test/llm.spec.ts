@@ -81,7 +81,7 @@ describe('toolMessage', () => {
   it('distinguishes allowed, failed, denied and unknown', () => {
     expect(toolMessage({ tool: 't', args: {}, decision: 'allow', result: 'done' })).toBe('done');
     expect(toolMessage({ tool: 't', args: {}, decision: 'allow', error: 'boom' })).toBe('FAILED: boom');
-    expect(toolMessage({ tool: 't', args: {}, decision: 'deny', reason: 'stepup_declined' })).toMatch(/^BLOCKED.*stepup_declined/);
+    expect(toolMessage({ tool: 't', args: {}, decision: 'deny', reason: 'policy_denied' })).toMatch(/^BLOCKED by Humanos \(policy_denied\)/);
     expect(toolMessage({ tool: 'x', args: {}, decision: 'deny', reason: 'unknown_tool' })).toMatch(/no tool called x/);
   });
 });
