@@ -15,7 +15,16 @@
  */
 import { createInterface } from 'node:readline/promises';
 import { join } from 'node:path';
-import { getMandates, type ViaMcpClient } from '@humanos/agent-sdk';
+import {
+  getAction,
+  getMandates,
+  getPolicy,
+  requestMandate,
+  waitForMandate,
+  type AgentPolicy,
+  type ToolAccess,
+  type ViaMcpClient,
+} from '@humanos/agent-sdk';
 import { ROOT, loadEnv, must } from './env.js';
 import { storedSoftwareKey } from './stored-key.js';
 import {
@@ -23,17 +32,12 @@ import {
   connect,
   declareTools,
   getActor,
-  getPolicy,
   mandateKinds,
-  mandateStatus,
   proposeAction,
   registerAgent,
-  requestPolicyMandate,
   serves,
-  type AgentPolicyView,
   type MandateKinds,
   type ServerInfo,
-  type ToolAccess,
 } from './connector.js';
 import { guardFor, type Guarded } from './guard.js';
 import { suggestedUserParams, toLlmTools } from './surface.js';
@@ -48,15 +52,10 @@ function flag(args: string[], name: string): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 
-async function pollMandate(client: ViaMcpClient, mandateId: string): Promise<void> {
-  for (;;) {
-    const s = await mandateStatus(client, mandateId);
-    if (s.phase !== 'PENDING') {
-      log(`${mandateId}: ${s.phase}`);
-      return;
-    }
-    await new Promise((r) => setTimeout(r, 3_000));
-  }
+/** Wait for the person's answer, the SDK's way: until they decide, the link expires, or ten minutes pass. */
+async function awaitMandate(client: ViaMcpClient, requested: Parameters<typeof waitForMandate>[1]): Promise<void> {
+  const s = await waitForMandate(client, requested);
+  log(`${s.mandateId}: ${s.phase}${s.phase === 'PENDING' ? ' (still waiting: `wait <id>` to keep waiting)' : ''}`);
 }
 
 /** `run` and `chat` take `--mandate <id>`: the held mandate a tool the policy leaves to one presents. */
@@ -76,7 +75,7 @@ const ACCESS: Record<Exclude<ToolAccess, 'not_set'>, string> = { allow: 'Allow',
 const BY_DEFAULT = { allow: 'Allowed by default', deny: 'Blocked by default' } as const;
 
 /** The policy in force and its default, and each declared tool's access by its dashboard name, with the controls behind it. */
-function logPolicy(view: AgentPolicyView): void {
+function logPolicy(view: AgentPolicy): void {
   const byDefault = view.policy?.default ?? 'allow';
   log(
     view.policy
@@ -84,7 +83,6 @@ function logPolicy(view: AgentPolicyView): void {
       : 'no policy decides these calls: every call is refused',
   );
   if (view.standing) log(`  every call is refused: ${view.standing}`);
-  if (view.everyCall) log(`  every call also passes ${view.everyCall.name}`);
   const width = Math.max(0, ...view.tools.map((t) => t.tool.length));
   for (const t of view.tools) {
     const names = (t.access === 'rules' ? t.controls : t.mandateControls)?.map((c) => c.name) ?? [];
@@ -179,10 +177,12 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
       const kinds = await mandateKinds(client, key.did);
       const policy = kinds.policies.find((p) => p.name === def.surface.name);
       if (!policy) throw new Error(`action "${def.surface.name}": ${notOffered(kinds)}`);
-      const req = await requestPolicyMandate(client, {
-        did: key.did,
+      // The limits the control asks for: a connector with the policy names a control by id only, so read it.
+      const published = policy.userParams ?? (await getAction(client, policy.id)).userParams;
+      const req = await requestMandate(client, key.did, {
+        kind: 'guardrail',
         actionId: policy.id,
-        userParams: suggestedUserParams(def.surface, policy.userParams),
+        userParams: suggestedUserParams(def.surface, published),
         contact,
         name: def.mandate.name,
         description: def.mandate.description,
@@ -190,14 +190,14 @@ export async function runCli(def: AgentDef, argv: string[] = process.argv.slice(
       log(`asked ${req.consentCard.grantor} for ${req.mandateId} [${req.status}]`);
       log(`  terms: ${req.consentCard.terms}`);
       log(`  approve at: ${req.consentCard.link ?? '(link sent to their channel)'} (until ${req.consentCard.expiresAt})`);
-      if (rest.includes('--wait')) await pollMandate(client, req.mandateId);
+      if (rest.includes('--wait')) await awaitMandate(client, req);
       return;
     }
 
     case 'wait': {
       const id = rest[0];
       if (!id) throw new Error('wait <mandateId>');
-      return pollMandate(client, id);
+      return awaitMandate(client, id);
     }
 
     case 'run': {

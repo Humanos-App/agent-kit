@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ViaMcpClient, ViaToolResult } from '@humanos/agent-sdk';
 import { createViaMcpClient, ViaMcpAuthError } from '@humanos/agent-sdk';
-import { ConnectorRefusal, call, declareTools, getActor, mandateKinds, proposeAction, registerAgent, requestPolicyMandate } from '../lib/connector.js';
+import { ConnectorRefusal, call, declareTools, getActor, mandateKinds, proposeAction, registerAgent } from '../lib/connector.js';
 import { suggestedUserParams, toDeclaration, toInputSchema } from '../lib/surface.js';
 import { errorLine } from '../lib/cli.js';
 import { storedSoftwareKey } from '../lib/stored-key.js';
@@ -145,12 +145,6 @@ describe('connector', () => {
     await proposeAction(client, 'did:x', SUPPORT_SURFACE);
     expect(calls[0]!.args).toMatchObject({ name: SUPPORT_SURFACE.name, did: 'did:x', rules: SUPPORT_SURFACE.rules });
     expect(Object.keys(calls[0]!.args.grantorParams as object)).toEqual(['credit_limit', 'allow_contact_changes']);
-  });
-
-  it('requestPolicyMandate: a policy request carrying the §20 description the person reads', async () => {
-    const { client, calls } = fakeClient(() => json({ mandateId: 'm', status: 'DRAFT', consentCard: { terms: '', grantor: 'a@b', expiresAt: '', note: '' } }));
-    await requestPolicyMandate(client, { did: 'did:x', actionId: 'act', userParams: { credit_limit: 50 }, contact: 'a@b', name: 'N', description: 'D' });
-    expect(calls[0]!.args).toEqual({ kind: 'policy', actionId: 'act', userParams: { credit_limit: 50 }, grantor: { contact: 'a@b' }, name: 'N', description: 'D', did: 'did:x' });
   });
 
   it('suggestedUserParams keeps only what the published policy has', () => {

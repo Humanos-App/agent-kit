@@ -12,7 +12,7 @@ import { guardFor } from '../lib/guard.js';
 import { describe as describeResult, guardedCall } from '../lib/runner.js';
 import { toolMessage } from '../lib/llm.js';
 import { storedSoftwareKey } from '../lib/stored-key.js';
-import type { ToolAccess } from '../lib/connector.js';
+import type { ToolAccess } from '@humanos/agent-sdk';
 import { makeSupportWorld, supportAgent } from '../examples/support/agent.js';
 
 const json = (v: unknown): ViaToolResult => ({ text: JSON.stringify(v), isError: false });
@@ -35,7 +35,13 @@ function connector(opts: { tools?: string[]; held?: unknown[]; access?: Record<s
     callTool: async (name, args = {}) => {
       calls.push({ name, args });
       if (name === 'get_policy') {
-        const tools = Object.entries(opts.access ?? {}).map(([tool, access]) => ({ tool, access, meaning: '' }));
+        const tools = Object.entries(opts.access ?? {}).map(([tool, access]) => ({
+          tool,
+          access,
+          meaning: '',
+          // As the connector says it for a Delegate tool with no control.
+          ...(access === 'mandate' ? { request: { kind: 'authorization', maxExecutions: 1 } } : {}),
+        }));
         return json({ agent: args.agentDid, policy: { id: POLICY, version: 1, default: 'allow' }, tools });
       }
       if (name === 'get_mandate') return json(opts.held ?? []);
@@ -116,5 +122,17 @@ describe('a deny on the policy', () => {
     const r = { tool: 'issue_goodwill_credit', args: {}, decision: 'deny' as const, reason: 'mandate_required', under: [SUPPORT_DESK] };
     expect(describeResult(r)).toContain(`DENIED (mandate_required) — a mandate under ${SUPPORT_DESK} — the tool never ran`);
     expect(toolMessage(r)).toMatch(new RegExp(`^BLOCKED by Humanos \\(mandate_required\\)\\. It needs a person's mandate under one of: ${SUPPORT_DESK}\\.`));
+  });
+
+  it("mandate_required with no control asks for a person's authorization of this one call, in the run log and to the model", async () => {
+    const world = makeSupportWorld();
+    const { client } = connector({
+      access: { issue_goodwill_credit: 'mandate' },
+      verify: () => ({ decision: 'deny', reason: 'mandate_required', evaluations: [] }),
+    });
+    const r = await guardedCall((await guardFor(client, await registeredKey())).guard, world, 'issue_goodwill_credit', { policy_id: 'P-1001', amount_eur: 25 });
+    expect(r).toMatchObject({ request: { kind: 'authorization', maxExecutions: 1 } });
+    expect(describeResult(r)).toContain("— a person's authorization for this one call — the tool never ran");
+    expect(toolMessage(r)).toContain("It needs a person's authorization for this one call.");
   });
 });
